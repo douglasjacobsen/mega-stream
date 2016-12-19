@@ -233,18 +233,22 @@ int main(int argc, char *argv[])
   /* Run the kernel multiple times */
   for (int t = 0; t < ntimes; t++)
   {
-    struct timeval tick;
-    gettimeofday(&tick, 0);
+    struct timeval timstr;
+    gettimeofday(&timstr, 0);
+    double tick = timstr.tv_sec + (timstr.tv_usec / 1000000.0);
 
     int blocks = M_size*L_size;
     int threads = S_size;
     kernel<<<blocks, threads>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
     check_error(__LINE__);
+
     cudaDeviceSynchronize();
     check_error(__LINE__);
-    struct timeval tock;
-    gettimeofday(&tock, 0);
-    timings[t] = (1.0E6*(tock.tv_sec-tick.tv_sec) + tock.tv_usec-tick.tv_usec)/1.0E3;
+
+    gettimeofday(&timstr, 0);
+    double tock = timstr.tv_sec + (timstr.tv_usec / 1000000.0);
+
+    timings[t] = tock-tick;
 
   }
 
