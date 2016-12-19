@@ -73,8 +73,15 @@ bool split = false;
 __global__
 void kernel(
   const int S_size, const int M_size, const int L_size,
-  double *r, double *q, double *x, double *y, double *z,
-  double *a, double *b, double *c, double *sum
+  double * __restrict__ r,
+  const double * __restrict__ q,
+  const double * __restrict__ x,
+  const double * __restrict__ y,
+  const double * __restrict__ z,
+  const double * __restrict__ a,
+  const double * __restrict__ b,
+  const double * __restrict__ c,
+  double * __restrict__ sum
 )
 {
   /**************************************************************************
@@ -110,8 +117,14 @@ void kernel(
 __global__
 void kernel_compute(
   const int S_size, const int M_size, const int L_size,
-  double *r, double *q, double *x, double *y, double *z,
-  double *a, double *b, double *c, double *sum
+  double * __restrict__ r,
+  const double * __restrict__ q,
+  const double * __restrict__ x,
+  const double * __restrict__ y,
+  const double * __restrict__ z,
+  const double * __restrict__ a,
+  const double * __restrict__ b,
+  const double * __restrict__ c
 )
 {
   const int id = threadIdx.x + blockIdx.x * blockDim.x;
@@ -129,8 +142,8 @@ void kernel_compute(
 __global__
 void kernel_reduce(
   const int S_size, const int M_size, const int L_size,
-  double *r, double *q, double *x, double *y, double *z,
-  double *a, double *b, double *c, double *sum
+  const double * __restrict__ r,
+  double * __restrict__ sum
 )
 {
   const int k = blockIdx.x / M_size;
@@ -303,10 +316,10 @@ int main(int argc, char *argv[])
       int workers = 256;
       int work = (L_size*M_size*S_size) / workers;
 
-      kernel_compute<<<work, workers>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
+      kernel_compute<<<work, workers>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c);
       check_error(__LINE__);
 
-      kernel_reduce<<<blocks, threads, sizeof(double)*S_size>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
+      kernel_reduce<<<blocks, threads, sizeof(double)*S_size>>>(S_size, M_size, L_size, d_r, d_sum);
       check_error(__LINE__);
     }
 
