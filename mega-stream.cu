@@ -62,6 +62,7 @@
 #define TOLR 1.0E-15
 
 void parse_args(int argc, char *argv[]);
+void check_error(int line);
 
 int L_size = LARGE;
 int M_size = MEDIUM;
@@ -352,3 +353,14 @@ void parse_args(int argc, char *argv[])
     }
   }
 }
+
+void check_error(int line)
+{
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess)
+  {
+    fprintf(stderr, "Error on line %d: %s\n", line, cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+}
+
