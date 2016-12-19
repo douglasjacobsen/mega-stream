@@ -68,6 +68,35 @@ int M_size = MEDIUM;
 int S_size = SMALL;
 int ntimes = 100;
 
+void kernel(
+  const int S_size, const int M_size, const int L_size,
+  double *r, double *q, double *x, double *y, double *z,
+  double *a, double *b, double *c, double *sum
+)
+{
+  /**************************************************************************
+   * Kernel
+   *************************************************************************/
+  for (int k = 0; k < L_size; k++)
+  {
+    for (int j = 0; j < M_size; j++)
+    {
+      double total = 0.0;
+      for (int i = 0; i < S_size; i++)
+      {
+        r[IDX3(i,j,k,S_size,M_size)] =
+          q[IDX3(i,j,k,S_size,M_size)]
+          + a[i] * x[IDX2(i,j,S_size)]
+          + b[i] * y[IDX2(i,j,S_size)]
+          + c[i] * z[IDX2(i,j,S_size)];
+
+        total += r[IDX3(i,j,k,S_size,M_size)];
+      }
+      sum[IDX2(j,k,M_size)] += total;
+    }
+  }
+}
+ 
 int main(int argc, char *argv[])
 {
 
@@ -162,27 +191,8 @@ int main(int argc, char *argv[])
     struct timeval tick;
     gettimeofday(&tick, 0);
 
-    /**************************************************************************
-     * Kernel
-     *************************************************************************/
-    for (int k = 0; k < L_size; k++)
-    {
-      for (int j = 0; j < M_size; j++)
-      {
-        double total = 0.0;
-        for (int i = 0; i < S_size; i++)
-        {
-          r[IDX3(i,j,k,S_size,M_size)] =
-            q[IDX3(i,j,k,S_size,M_size)]
-            + a[i] * x[IDX2(i,j,S_size)]
-            + b[i] * y[IDX2(i,j,S_size)]
-            + c[i] * z[IDX2(i,j,S_size)];
+    kernel(S_size, M_size, L_size, r, q, x, y, z, a, b, c, sum);
 
-          total += r[IDX3(i,j,k,S_size,M_size)];
-        }
-        sum[IDX2(j,k,M_size)] += total;
-      }
-    }
     struct timeval tock;
     gettimeofday(&tock, 0);
     timings[t] = (1.0E6*(tock.tv_sec-tick.tv_sec) + tock.tv_usec-tick.tv_usec)/1.0E3;
