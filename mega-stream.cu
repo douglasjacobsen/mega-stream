@@ -185,6 +185,28 @@ int main(int argc, char *argv[])
     }
   }
 
+  /* Device memory */
+  double *d_r, *d_q, *d_x, *d_y, *d_z, *d_a, *d_b, *d_c, *d_sum;
+  cudaMalloc(&d_r, sizeof(double)*L_size*M_size*S_size);
+  cudaMalloc(&d_q, sizeof(double)*L_size*M_size*S_size);
+  cudaMalloc(&d_x, sizeof(double)*M_size*S_size);
+  cudaMalloc(&d_y, sizeof(double)*M_size*S_size);
+  cudaMalloc(&d_z, sizeof(double)*M_size*S_size);
+  cudaMalloc(&d_a, sizeof(double)*S_size);
+  cudaMalloc(&d_b, sizeof(double)*S_size);
+  cudaMalloc(&d_c, sizeof(double)*S_size);
+  cudaMalloc(&d_sum, sizeof(double)*M_size*L_size);
+
+  cudaMemcpy(d_r, r, sizeof(double)*L_size*M_size*S_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_q, q, sizeof(double)*L_size*M_size*S_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_x, x, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_y, y, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_z, z, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_a, a, sizeof(double)*S_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_b, b, sizeof(double)*S_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_c, c, sizeof(double)*S_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_sum, sum, sizeof(double)*M_size*L_size, cudaMemcpyHostToDevice);
+
   /* Run the kernel multiple times */
   for (int t = 0; t < ntimes; t++)
   {
@@ -244,6 +266,15 @@ sumcheck:
   printf("%12.1f %11.6f %11.6f %11.6f\n", size/min, min, max, avg);
 
   /* Free memory */
+  cudaFree(q);
+  cudaFree(r);
+  cudaFree(x);
+  cudaFree(y);
+  cudaFree(z);
+  cudaFree(a);
+  cudaFree(b);
+  cudaFree(c);
+  cudaFree(sum);
   free(q);
   free(r);
   free(x);
