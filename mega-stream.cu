@@ -189,24 +189,42 @@ int main(int argc, char *argv[])
   /* Device memory */
   double *d_r, *d_q, *d_x, *d_y, *d_z, *d_a, *d_b, *d_c, *d_sum;
   cudaMalloc(&d_r, sizeof(double)*L_size*M_size*S_size);
+  check_error(__LINE__);
   cudaMalloc(&d_q, sizeof(double)*L_size*M_size*S_size);
+  check_error(__LINE__);
   cudaMalloc(&d_x, sizeof(double)*M_size*S_size);
+  check_error(__LINE__);
   cudaMalloc(&d_y, sizeof(double)*M_size*S_size);
+  check_error(__LINE__);
   cudaMalloc(&d_z, sizeof(double)*M_size*S_size);
+  check_error(__LINE__);
   cudaMalloc(&d_a, sizeof(double)*S_size);
+  check_error(__LINE__);
   cudaMalloc(&d_b, sizeof(double)*S_size);
+  check_error(__LINE__);
   cudaMalloc(&d_c, sizeof(double)*S_size);
+  check_error(__LINE__);
   cudaMalloc(&d_sum, sizeof(double)*M_size*L_size);
+  check_error(__LINE__);
 
   cudaMemcpy(d_r, r, sizeof(double)*L_size*M_size*S_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
   cudaMemcpy(d_q, q, sizeof(double)*L_size*M_size*S_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
   cudaMemcpy(d_x, x, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
   cudaMemcpy(d_y, y, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
   cudaMemcpy(d_z, z, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
   cudaMemcpy(d_a, a, sizeof(double)*S_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
   cudaMemcpy(d_b, b, sizeof(double)*S_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
   cudaMemcpy(d_c, c, sizeof(double)*S_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
   cudaMemcpy(d_sum, sum, sizeof(double)*M_size*L_size, cudaMemcpyHostToDevice);
+  check_error(__LINE__);
 
   /* Run the kernel multiple times */
   for (int t = 0; t < ntimes; t++)
@@ -228,14 +246,23 @@ int main(int argc, char *argv[])
 
   /* Copy back memory */
   cudaMemcpy(r, d_r, sizeof(double)*L_size*M_size*S_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
   cudaMemcpy(q, d_q, sizeof(double)*L_size*M_size*S_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
   cudaMemcpy(x, d_x, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
   cudaMemcpy(y, d_y, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
   cudaMemcpy(z, d_z, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
   cudaMemcpy(a, d_a, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
   cudaMemcpy(b, d_b, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
   cudaMemcpy(c, d_c, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
   cudaMemcpy(sum, d_sum, sizeof(double)*M_size*L_size, cudaMemcpyDeviceToHost);
+  check_error(__LINE__);
 
   /* Check the r array */
   for (int k = 0; k < L_size; k++)
