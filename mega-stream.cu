@@ -69,6 +69,7 @@ int M_size = MEDIUM;
 int S_size = SMALL;
 int ntimes = 100;
 
+__global__
 void kernel(
   const int S_size, const int M_size, const int L_size,
   double *r, double *q, double *x, double *y, double *z,
@@ -78,23 +79,26 @@ void kernel(
   /**************************************************************************
    * Kernel
    *************************************************************************/
-  for (int k = 0; k < L_size; k++)
-  {
-    for (int j = 0; j < M_size; j++)
-    {
-      double total = 0.0;
-      for (int i = 0; i < S_size; i++)
-      {
-        r[IDX3(i,j,k,S_size,M_size)] =
-          q[IDX3(i,j,k,S_size,M_size)]
-          + a[i] * x[IDX2(i,j,S_size)]
-          + b[i] * y[IDX2(i,j,S_size)]
-          + c[i] * z[IDX2(i,j,S_size)];
+  const int k = blockIdx.x / M_size;
+  const int j = blockIdx.x % M_size;
+  const int i = threadIdx.x;
 
-        total += r[IDX3(i,j,k,S_size,M_size)];
-      }
-      sum[IDX2(j,k,M_size)] += total;
-    }
+  __shared__ double totals[SMALL];
+
+  r[IDX3(i,j,k,S_size,M_size)] =
+    q[IDX3(i,j,k,S_size,M_size)]
+    + a[i] * x[IDX2(i,j,S_size)]
+    + b[i] * y[IDX2(i,j,S_size)]
+    + c[i] * z[IDX2(i,j,S_size)];
+
+  totals[i] = r[IDX3(i,j,k,S_size,M_size)];
+
+  __syncthreads();
+
+  if (i == 0)
+  {
+    for (int l = 0; l < blockDim.x; l++)
+      sum[IDX2(j,k,M_size)] += totals[l];
   }
 }
  
@@ -232,8 +236,12 @@ int main(int argc, char *argv[])
     struct timeval tick;
     gettimeofday(&tick, 0);
 
-    kernel(S_size, M_size, L_size, r, q, x, y, z, a, b, c, sum);
-
+    int blocks = M_size*L_size;
+    int threads = S_size;
+    kernel<<<blocks, threads>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
+    check_error(__LINE__);
+    cudaDeviceSynchronize();
+    check_error(__LINE__);
     struct timeval tock;
     gettimeofday(&tock, 0);
     timings[t] = (1.0E6*(tock.tv_sec-tick.tv_sec) + tock.tv_usec-tick.tv_usec)/1.0E3;
