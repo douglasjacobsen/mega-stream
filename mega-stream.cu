@@ -93,13 +93,17 @@ void kernel(
 
   totals[i] = r[IDX3(i,j,k,S_size,M_size)];
 
-  __syncthreads();
+  for (int offset = blockDim.x / 2; offset > 0; offset /= 2)
+  {
+    __syncthreads();
+    if (i < offset)
+    {
+      totals[i] += + totals[i + offset];
+    }
+  }
 
   if (i == 0)
-  {
-    for (int l = 0; l < blockDim.x; l++)
-      sum[IDX2(j,k,M_size)] += totals[l];
-  }
+    sum[IDX2(j,k,M_size)] += totals[i];
 }
  
 int main(int argc, char *argv[])
