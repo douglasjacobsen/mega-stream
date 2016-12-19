@@ -225,6 +225,17 @@ int main(int argc, char *argv[])
   const double gold = 0.1 + 0.2*0.6 + 0.3*0.7 + 0.4*0.8;
   const double gold_sum = gold*S_size*ntimes;
 
+  /* Copy back memory */
+  cudaMemcpy(r, d_r, sizeof(double)*L_size*M_size*S_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(q, d_q, sizeof(double)*L_size*M_size*S_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(x, d_x, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(y, d_y, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(z, d_z, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(a, d_a, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(b, d_b, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(c, d_c, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(sum, d_sum, sizeof(double)*M_size*L_size, cudaMemcpyDeviceToHost);
+
   /* Check the r array */
   for (int k = 0; k < L_size; k++)
     for (int j = 0; j < M_size; j++)
