@@ -68,6 +68,7 @@ int L_size = LARGE;
 int M_size = MEDIUM;
 int S_size = SMALL;
 int ntimes = 100;
+bool split = false;
 
 __global__
 void kernel(
@@ -106,6 +107,54 @@ void kernel(
     sum[IDX2(j,k,M_size)] += totals[i];
 }
  
+__global__
+void kernel_compute(
+  const int S_size, const int M_size, const int L_size,
+  double *r, double *q, double *x, double *y, double *z,
+  double *a, double *b, double *c, double *sum
+)
+{
+  const int id = threadIdx.x + blockIdx.x * blockDim.x;
+  const int i = id % S_size;
+  const int j = (id / S_size) % M_size;
+  const int k = (id / S_size) / M_size;
+
+  r[IDX3(i,j,k,S_size,M_size)] =
+    q[IDX3(i,j,k,S_size,M_size)]
+    + a[i] * x[IDX2(i,j,S_size)]
+    + b[i] * y[IDX2(i,j,S_size)]
+    + c[i] * z[IDX2(i,j,S_size)];
+}
+
+__global__
+void kernel_reduce(
+  const int S_size, const int M_size, const int L_size,
+  double *r, double *q, double *x, double *y, double *z,
+  double *a, double *b, double *c, double *sum
+)
+{
+  const int k = blockIdx.x / M_size;
+  const int j = blockIdx.x % M_size;
+  const int i = threadIdx.x;
+
+  extern __shared__ double totals[];
+
+  totals[i] = r[IDX3(i,j,k,S_size,M_size)];
+
+  for (int offset = blockDim.x / 2; offset > 0; offset /= 2)
+  {
+    __syncthreads();
+    if (i < offset)
+    {
+      totals[i] += + totals[i + offset];
+    }
+  }
+
+  if (i == 0)
+    sum[IDX2(j,k,M_size)] += totals[i];
+
+}
+
 int main(int argc, char *argv[])
 {
 
@@ -243,8 +292,23 @@ int main(int argc, char *argv[])
 
     int blocks = M_size*L_size;
     int threads = S_size;
-    kernel<<<blocks, threads, sizeof(double)*S_size>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
-    check_error(__LINE__);
+
+    if (!split)
+    {
+      kernel<<<blocks, threads, sizeof(double)*S_size>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
+      check_error(__LINE__);
+    }
+    else
+    {
+      int workers = 256;
+      int work = (L_size*M_size*S_size) / workers;
+
+      kernel_compute<<<work, workers>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
+      check_error(__LINE__);
+
+      kernel_reduce<<<blocks, threads, sizeof(double)*S_size>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
+      check_error(__LINE__);
+    }
 
     cudaDeviceSynchronize();
     check_error(__LINE__);
@@ -375,6 +439,10 @@ void parse_args(int argc, char *argv[])
         exit(EXIT_FAILURE);
       }
     }
+    else if (strcmp(argv[i], "--split") == 0)
+    {
+      split = true;
+    }
     else if (strcmp(argv[i], "--help") == 0)
     {
       printf("Usage: %s [OPTION]\n", argv[0]);
@@ -383,6 +451,7 @@ void parse_args(int argc, char *argv[])
       printf("\t --small n \tSet size of small dimension\n");
       printf("\t --swap\tSwap medium and large sizes over\n");
       printf("\t --ntimes n\tRun the benchmark n times\n");
+      printf("\t --split n\tSplit compute and reduction kernels\n");
       printf("\n");
       printf("\t Large  is %12d elements\n", LARGE);
       printf("\t Medium is %12d elements\n", MEDIUM);
