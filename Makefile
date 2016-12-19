@@ -43,4 +43,4 @@ mega-stream-cuda: mega-stream.cu
 .PHONY: clean
 
 clean:
-	rm -f mega-stream mega-stream-omp4 mega-stream-ftn
+	rm -f mega-stream mega-stream-omp4 mega-stream-ftn mega-stream-cuda
