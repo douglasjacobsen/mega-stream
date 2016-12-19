@@ -83,7 +83,7 @@ void kernel(
   const int j = blockIdx.x % M_size;
   const int i = threadIdx.x;
 
-  __shared__ double totals[SMALL];
+  extern __shared__ double totals[];
 
   r[IDX3(i,j,k,S_size,M_size)] =
     q[IDX3(i,j,k,S_size,M_size)]
@@ -243,7 +243,7 @@ int main(int argc, char *argv[])
 
     int blocks = M_size*L_size;
     int threads = S_size;
-    kernel<<<blocks, threads>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
+    kernel<<<blocks, threads, sizeof(double)*S_size>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
     check_error(__LINE__);
 
     cudaDeviceSynchronize();
