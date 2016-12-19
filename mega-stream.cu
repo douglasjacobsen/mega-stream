@@ -277,15 +277,15 @@ sumcheck:
   printf("%12.1f %11.6f %11.6f %11.6f\n", size/min, min, max, avg);
 
   /* Free memory */
-  cudaFree(q);
-  cudaFree(r);
-  cudaFree(x);
-  cudaFree(y);
-  cudaFree(z);
-  cudaFree(a);
-  cudaFree(b);
-  cudaFree(c);
-  cudaFree(sum);
+  cudaFree(d_q);
+  cudaFree(d_r);
+  cudaFree(d_x);
+  cudaFree(d_y);
+  cudaFree(d_z);
+  cudaFree(d_a);
+  cudaFree(d_b);
+  cudaFree(d_c);
+  cudaFree(d_sum);
   free(q);
   free(r);
   free(x);
