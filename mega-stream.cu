@@ -455,6 +455,7 @@ void parse_args(int argc, char *argv[])
     else if (strcmp(argv[i], "--split") == 0)
     {
       split = true;
+      printf("Using split kernels\n");
     }
     else if (strcmp(argv[i], "--help") == 0)
     {
