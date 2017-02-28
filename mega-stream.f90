@@ -116,7 +116,7 @@ PROGRAM megastream
   ALLOCATE(c(VLEN,Ng))
   ALLOCATE(total(Nj,Nk,Nl,Nm))
 
-  CALL init(Ni, Nj, Nk, Nl, Nm, r, q, x, y, z, a, b, c, total)
+  CALL init(VLEN, Nj, Nk, Nl, Ng, Nm, r, q, x, y, z, a, b, c, total)
 
   ALLOCATE(timings(ntimes))
 
@@ -228,16 +228,16 @@ END SUBROUTINE kernel
 !*************************************************************************/
 
 ! Initilise the arrays
-SUBROUTINE init(Ni, Nj, Nk, Nl, Nm, r, q, x, y, z, a, b, c, total)
+SUBROUTINE init(VLEN, Nj, Nk, Nl, Ng, Nm, r, q, x, y, z, a, b, c, total)
 
   IMPLICIT NONE
 
-  INTEGER, INTENT(IN) :: Ni, Nj, Nk, Nl, Nm
-  REAL(8), DIMENSION(Ni, Nj, Nk, Nl, Nm), INTENT(INOUT) :: q, r
-  REAL(8), DIMENSION(Ni, Nj, Nk, Nm), INTENT(INOUT) :: x
-  REAL(8), DIMENSION(Ni, Nj, Nl, Nm), INTENT(INOUT) :: y
-  REAL(8), DIMENSION(Ni, Nk, Nl, Nm), INTENT(INOUT) :: z
-  REAL(8), DIMENSION(Ni), INTENT(INOUT) :: a, b, c
+  INTEGER, INTENT(IN) :: VLEN, Nj, Nk, Nl, Ng, Nm
+  REAL(8), DIMENSION(VLEN, Nj, Nk, Nl, Ng, Nm), INTENT(INOUT) :: q, r
+  REAL(8), DIMENSION(VLEN, Nj, Nk, Ng, Nm), INTENT(INOUT) :: x
+  REAL(8), DIMENSION(VLEN, Nj, Nl, Ng, Nm), INTENT(INOUT) :: y
+  REAL(8), DIMENSION(VLEN, Nk, Nl, Ng, Nm), INTENT(INOUT) :: z
+  REAL(8), DIMENSION(VLEN, Ng), INTENT(INOUT) :: a, b, c
   REAL(8), DIMENSION(Nj, Nk, Nl, Nm), INTENT(INOUT) :: total
 
   ! Starting values
@@ -250,70 +250,80 @@ SUBROUTINE init(Ni, Nj, Nk, Nl, Nm, r, q, x, y, z, a, b, c, total)
   REAL(8), PARAMETER :: B_START = 0.07_8
   REAL(8), PARAMETER :: C_START = 0.08_8
 
-  INTEGER :: i, j, k, l, m
+  INTEGER :: v, j, k, l, g, m
 
 !$OMP PARALLEL
   ! q and r
 !$OMP DO
   DO m = 1, Nm
-    DO l = 1, Nl
-      DO k = 1, Nk
-        DO j = 1, Nj
-          DO i = 1, Ni
-            r(i,j,k,l,m) = R_START
-            q(i,j,k,l,m) = Q_START
+    DO g = 1, Ng
+      DO l = 1, Nl
+        DO k = 1, Nk
+          DO j = 1, Nj
+            DO v = 1, VLEN
+              r(v,j,k,l,g,m) = R_START
+              q(v,j,k,l,g,m) = Q_START
+            END DO
           END DO
-        END DO
+         END DO
        END DO
-     END DO
-   END DO
+    END DO
+  END DO
 !$OMP END DO
 
   ! x
 !$OMP DO
   DO m = 1, Nm
-    DO k = 1, Nk
-      DO j = 1, Nj
-        DO i = 1, Ni
-          x(i,j,k,m) = X_START
+    DO g = 1, Ng
+      DO k = 1, Nk
+        DO j = 1, Nj
+          DO v = 1, VLEN
+            x(v,j,k,g,m) = X_START
+          END DO
         END DO
-      END DO
-     END DO
-   END DO
+       END DO
+    END DO
+  END DO
 !$OMP END DO
 
   ! y
 !$OMP DO
   DO m = 1, Nm
-    DO l = 1, Nl
-      DO j = 1, Nj
-        DO i = 1, Ni
-          y(i,j,l,m) = Y_START
+    DO g = 1, Ng
+      DO l = 1, Nl
+        DO j = 1, Nj
+          DO v = 1, VLEN
+            y(v,j,l,g,m) = Y_START
+          END DO
         END DO
       END DO
-     END DO
-   END DO
+    END DO
+  END DO
 !$OMP END DO
 
   ! z
 !$OMP DO
   DO m = 1, Nm
-    DO l = 1, Nl
-      DO k = 1, Nk
-        DO i = 1, Ni
-          z(i,k,l,m) = Z_START
+    DO g = 1, Ng
+      DO l = 1, Nl
+        DO k = 1, Nk
+          DO v = 1, VLEN
+            z(v,k,l,g,m) = Z_START
+          END DO
         END DO
-      END DO
-     END DO
-   END DO
+       END DO
+    END DO
+  END DO
 !$OMP END DO
 
   ! a, b, and c
 !$OMP DO
-  DO i = 1, Ni
-    a(i) = A_START
-    b(i) = B_START
-    c(i) = C_START
+  DO g = 1, Ng
+    DO v = 1, VLEN
+      a(v,g) = A_START
+      b(v,g) = B_START
+      c(v,g) = C_START
+    END DO
   END DO
 !$OMP END DO
 
