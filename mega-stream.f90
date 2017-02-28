@@ -41,6 +41,9 @@ PROGRAM megastream
   ! Tollerance with which to check final array values
   REAL(8), PARAMETER :: TOLR = 1.0E-15
 
+  ! Vector length if machine-specific
+  INTEGER, PARAMETER :: VLEN = 8
+
   ! Variables
 
   ! Default strides
@@ -49,14 +52,15 @@ PROGRAM megastream
   INTEGER :: Nk = MIDDLE
   INTEGER :: Nl = MIDDLE
   INTEGER :: Nm = OUTER
+  INTEGER :: Ng
 
   ! Number of iterations to run benchmark
   INTEGER :: ntimes = 100
 
   ! Arrays
-  REAL(8), DIMENSION(:,:,:,:,:), POINTER :: q, r, ptr_tmp
-  REAL(8), DIMENSION(:,:,:,:), ALLOCATABLE :: x, y, z
-  REAL(8), DIMENSION(:), ALLOCATABLE :: a, b, c
+  REAL(8), DIMENSION(:,:,:,:,:,:), POINTER :: q, r, ptr_tmp
+  REAL(8), DIMENSION(:,:,:,:,:), ALLOCATABLE :: x, y, z
+  REAL(8), DIMENSION(:,:), ALLOCATABLE :: a, b, c
   REAL(8), DIMENSION(:,:,:,:), ALLOCATABLE :: total
 
   REAL(8), DIMENSION(:), ALLOCATABLE :: timings
@@ -95,16 +99,20 @@ PROGRAM megastream
     2.0*Ni*Nk*Nl*Nm +    & ! read and write z
     2.0*Nj*Nk*Nl*Nm )      ! read and write sum
 
+  ! Split inner-most dimension into VLEN-sized chunks
+  Ng = Ni / VLEN
+  WRITE(*, '(a,I,a,I)') 'Inner dimension split into ', Ng, ' chunks of size ', VLEN
+
   ! Allocate memory
   NULLIFY(q, r)
-  ALLOCATE(q(Ni,Nj,Nk,Nl,Nm))
-  ALLOCATE(r(Ni,Nj,Nk,Nl,Nm))
-  ALLOCATE(x(Ni,Nj,Nk,Nm))
-  ALLOCATE(y(Ni,Nj,Nl,Nm))
-  ALLOCATE(z(Ni,Nk,Nl,Nm))
-  ALLOCATE(a(Ni))
-  ALLOCATE(b(Ni))
-  ALLOCATE(c(Ni))
+  ALLOCATE(q(VLEN,Nj,Nk,Nl,Ng,Nm))
+  ALLOCATE(r(VLEN,Nj,Nk,Nl,Ng,Nm))
+  ALLOCATE(x(VLEN,Nj,Nk,Ng,Nm))
+  ALLOCATE(y(VLEN,Nj,Nl,Ng,Nm))
+  ALLOCATE(z(VLEN,Nk,Nl,Ng,Nm))
+  ALLOCATE(a(VLEN,Ng))
+  ALLOCATE(b(VLEN,Ng))
+  ALLOCATE(c(VLEN,Ng))
   ALLOCATE(total(Nj,Nk,Nl,Nm))
 
   CALL init(Ni, Nj, Nk, Nl, Nm, r, q, x, y, z, a, b, c, total)
@@ -116,7 +124,7 @@ PROGRAM megastream
   DO t = 1, ntimes
     tick = omp_get_wtime()
 
-    CALL kernel(Ni, Nj, Nk, Nl, Nm, r, q, x, y, z, a, b, c, total)
+    CALL kernel(VLEN, Nj, Nk, Nl, Ng, Nm, r, q, x, y, z, a, b, c, total)
 
     ! Swap the pointers
     ptr_tmp => q
@@ -154,56 +162,58 @@ END PROGRAM megastream
 !**************************************************************************
 !* Kernel
 !*************************************************************************/
-SUBROUTINE kernel(Ni, Nj, Nk, Nl, Nm, r, q, x, y, z, a, b, c, total)
+SUBROUTINE kernel(VLEN, Nj, Nk, Nl, Ng, Nm, r, q, x, y, z, a, b, c, total)
 
   IMPLICIT NONE
   
-  INTEGER, INTENT(IN) :: Ni, Nj, Nk, Nl, Nm
+  INTEGER, INTENT(IN) :: VLEN, Nj, Nk, Nl, Ng, Nm
 
-  REAL(8), DIMENSION(Ni, Nj, Nk, Nl, Nm), INTENT(INOUT) :: q, r
-  REAL(8), DIMENSION(Ni, Nj, Nk, Nm), INTENT(INOUT) :: x
-  REAL(8), DIMENSION(Ni, Nj, Nl, Nm), INTENT(INOUT) :: y
-  REAL(8), DIMENSION(Ni, Nk, Nl, Nm), INTENT(INOUT) :: z
-  REAL(8), DIMENSION(Ni), INTENT(IN) :: a, b, c
+  REAL(8), DIMENSION(VLEN, Nj, Nk, Nl, Ng, Nm), INTENT(INOUT) :: q, r
+  REAL(8), DIMENSION(VLEN, Nj, Nk, Ng, Nm), INTENT(INOUT) :: x
+  REAL(8), DIMENSION(VLEN, Nj, Nl, Ng, Nm), INTENT(INOUT) :: y
+  REAL(8), DIMENSION(VLEN, Nk, Nl, Ng, Nm), INTENT(INOUT) :: z
+  REAL(8), DIMENSION(VLEN, Ng), INTENT(IN) :: a, b, c
   REAL(8), DIMENSION(Nj, Nk, Nl, Nm), INTENT(INOUT) :: total
 
   ! Local variables
-  INTEGER :: i, j, k, l, m
+  INTEGER :: v, j, k, l, g, m
   REAL(8) :: tmp_r, tmp_total
 
 !$OMP PARALLEL DO PRIVATE(tmp_r, tmp_total)
   DO m = 1, Nm
-    DO l = 1, Nl
-      DO k = 1, Nk
-        DO j = 1, Nj
-          tmp_total = 0.0_8
-          !DIR$ VECTOR NONTEMPORAL(r)
-          !$OMP SIMD REDUCTION(+:tmp_total) ALIGNED(a,b,c,x,y,z,r,q:64)
-          DO i = 1, Ni
-            ! Set r
-            tmp_r = q(i,j,k,l,m) +  &
-              a(i)*x(i,j,k,m) +     &
-              b(i)*y(i,j,l,m) +     &
-              c(i)*z(i,k,l,m)
+    DO g = 1, Ng
+      DO l = 1, Nl
+        DO k = 1, Nk
+          DO j = 1, Nj
+            tmp_total = 0.0_8
+            !DIR$ VECTOR NONTEMPORAL(r)
+            !$OMP SIMD REDUCTION(+:tmp_total) ALIGNED(a,b,c,x,y,z,r,q:64)
+            DO v = 1, VLEN
+              ! Set r
+              tmp_r = q(v,j,k,l,g,m) +  &
+                a(v,g)*x(v,j,k,g,m) +     &
+                b(v,g)*y(v,j,l,g,m) +     &
+                c(v,g)*z(v,k,l,g,m)
 
-            ! Update x, y and z
-            x(i,j,k,m) = 0.2_8*tmp_r - x(i,j,k,m)
-            y(i,j,l,m) = 0.2_8*tmp_r - y(i,j,l,m)
-            z(i,k,l,m) = 0.2_8*tmp_r - z(i,k,l,m)
+              ! Update x, y and z
+              x(v,j,k,g,m) = 0.2_8*tmp_r - x(v,j,k,g,m)
+              y(v,j,l,g,m) = 0.2_8*tmp_r - y(v,j,l,g,m)
+              z(v,k,l,g,m) = 0.2_8*tmp_r - z(v,k,l,g,m)
 
-            ! Reduce over Ni
-            tmp_total = tmp_total + tmp_r
+              ! Reduce over Ni
+              tmp_total = tmp_total + tmp_r
 
-            ! Save r
-            r(i,j,k,l,m) = tmp_r
+              ! Save r
+              r(v,j,k,l,g,m) = tmp_r
 
-          END DO ! i
+            END DO ! i
 
-          total(j,k,l,m) = total(j,k,l,m) + tmp_total
+            total(j,k,l,m) = total(j,k,l,m) + tmp_total
 
-        END DO ! j
-      END DO ! k
-    END DO ! l
+          END DO ! j
+        END DO ! k
+      END DO ! l
+    END DO ! g
   END DO ! m
 !$OMP END PARALLEL DO
 
