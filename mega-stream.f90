@@ -177,7 +177,7 @@ SUBROUTINE kernel(Ni, Nj, Nk, Nl, Nm, r, q, x, y, z, a, b, c, total)
       DO k = 1, Nk
         DO j = 1, Nj
           tmp_total = 0.0_8
-          !$OMP SIMD REDUCTION(+:tmp_total)
+          !$OMP SIMD REDUCTION(+:tmp_total) ALIGNED(a,b,c,x,y,z,r,q:64)
           DO i = 1, Ni
             ! Set r
             tmp_r = q(i,j,k,l,m) +  &
