@@ -38,7 +38,7 @@ mega-stream-ftn: mega-stream.f90
 	$(FTN) $(FFLAGS) $(OPTIONS) -align array64byte $(OMP) $^ -o $@
 
 mega-stream-cuda: mega-stream.cu
-	nvcc -O3 $(OPTIONS) $^ -o $@
+	nvcc -O3 $(OPTIONS) $^ -Xcompiler -fopenmp -o $@
 
 .PHONY: clean
 

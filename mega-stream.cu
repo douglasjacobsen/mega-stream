@@ -18,42 +18,38 @@
   along with mega-stream.  If not, see <http://www.gnu.org/licenses/>.
 
 
-  This aims to test the theory that streaming many large arrays causes memory
-  bandwidth limits not to be reached, and latency becomes a dominating factor.
-  We run a kernel with a similar form to the original triad, but with more than
-  3 input arrays.
+  This aims to investigate the limiting factor for a simple kernel, in particular
+  where bandwidth limits not to be reached, and latency becomes a dominating factor.
 
-  The main kernel computes:
-  r(i,j,k) = q(i,j,k) + a(i)*x(i,j) + b(i)*y(i,j) + c(i)*z(i,j)
-  sum(j,k) = SUM(r(:,j,k))
 */
 
-#define VERSION "0.2.1"
+#define VERSION "0.3"
 
 #include <float.h>
+#include <omp.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 
 #define MIN(a,b) ((a) < (b)) ? (a) : (b)
 #define MAX(a,b) ((a) > (b)) ? (a) : (b)
 
 #define IDX2(i,j,ni) ((i)+(ni)*(j))
 #define IDX3(i,j,k,ni,nj) ((i)+(ni)*IDX2((j),(k),(nj)))
+#define IDX4(i,j,k,l,ni,nj,nk) ((i)+(ni)*IDX3((j),(k),(l),(nj),(nk)))
+#define IDX5(i,j,k,l,m,ni,nj,nk,nl) ((i)+(ni)*IDX4((j),(k),(l),(m),(nj),(nk),(nl)))
 
 /*
-  Arrays are defined in terms of 3 sizes
-  The large arrays are of size SMALL*MEDIUM*LARGE and are indexed with 3 indicies.
-  The medium arrays are of size SMALL*MEDIUM and are indexed with 2 indicies.
-  The small arrays are of size SMALL and are indexed with 1 index.
+  Arrays are defined in terms of 3 sizes: inner, middle and outer.
+  The large arrays are of size inner*middle*middle*middle*outer.
+  The medium arrays are of size inner*middle*middle*outer.
+  The small arrays are of size inner and are indexed with 1 index.
 
-  By default the large array has 2^27 elements, and the small array has 64 elements (2^6).
 */
-#define LARGE  4096 // 2^12
-#define MEDIUM  512 // 2^9
-#define SMALL    64 // 2^6
+#define OUTER   64 // 3^6
+#define MIDDLE  16 // 2^4
+#define INNER  128 // 2^7
 
 /* Default alignment of 2 MB page boundaries */
 #define ALIGNMENT 2*1024*1024
@@ -61,112 +57,38 @@
 /* Tollerance with which to check final array values */
 #define TOLR 1.0E-15
 
-void parse_args(int argc, char *argv[]);
-void check_error(int line);
+/* Starting values */
+#define R_START 0.0
+#define Q_START 0.01
+#define X_START 0.02
+#define Y_START 0.03
+#define Z_START 0.04
+#define A_START 0.06
+#define B_START 0.07
+#define C_START 0.08
 
-int L_size = LARGE;
-int M_size = MEDIUM;
-int S_size = SMALL;
-int ntimes = 100;
-bool split = false;
 
-__global__
 void kernel(
-  const int S_size, const int M_size, const int L_size,
-  double * __restrict__ r,
-  const double * __restrict__ q,
-  const double * __restrict__ x,
-  const double * __restrict__ y,
-  const double * __restrict__ z,
-  const double * __restrict__ a,
-  const double * __restrict__ b,
-  const double * __restrict__ c,
-  double * __restrict__ sum
-)
-{
-  /**************************************************************************
-   * Kernel
-   *************************************************************************/
-  const int k = blockIdx.x / M_size;
-  const int j = blockIdx.x % M_size;
-  const int i = threadIdx.x;
+  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
+  double * __restrict__ r, const double * __restrict__ q,
+  double * __restrict__ x, double * __restrict__ y, double * __restrict__ z,
+  const double * __restrict__ a, const double * __restrict__ b, const double * __restrict__ c,
+  double * __restrict__ sum,
+  const int Nplanes,
+  int ** __restrict__ planes,
+  int * __restrict__ Ncells
+);
+void parse_args(int argc, char *argv[]);
 
-  extern __shared__ double totals[];
+/* Default strides */
+int Ni = INNER;
+int Nj = MIDDLE;
+int Nk = MIDDLE;
+int Nl = MIDDLE;
+int Nm = OUTER;
 
-  r[IDX3(i,j,k,S_size,M_size)] =
-    q[IDX3(i,j,k,S_size,M_size)]
-    + a[i] * x[IDX2(i,j,S_size)]
-    + b[i] * y[IDX2(i,j,S_size)]
-    + c[i] * z[IDX2(i,j,S_size)];
-
-  totals[i] = r[IDX3(i,j,k,S_size,M_size)];
-
-  for (int offset = blockDim.x / 2; offset > 0; offset /= 2)
-  {
-    __syncthreads();
-    if (i < offset)
-    {
-      totals[i] += + totals[i + offset];
-    }
-  }
-
-  if (i == 0)
-    sum[IDX2(j,k,M_size)] += totals[i];
-}
- 
-__global__
-void kernel_compute(
-  const int S_size, const int M_size, const int L_size,
-  double * __restrict__ r,
-  const double * __restrict__ q,
-  const double * __restrict__ x,
-  const double * __restrict__ y,
-  const double * __restrict__ z,
-  const double * __restrict__ a,
-  const double * __restrict__ b,
-  const double * __restrict__ c
-)
-{
-  const int id = threadIdx.x + blockIdx.x * blockDim.x;
-  const int i = id % S_size;
-  const int j = (id / S_size) % M_size;
-  const int k = (id / S_size) / M_size;
-
-  r[IDX3(i,j,k,S_size,M_size)] =
-    q[IDX3(i,j,k,S_size,M_size)]
-    + a[i] * x[IDX2(i,j,S_size)]
-    + b[i] * y[IDX2(i,j,S_size)]
-    + c[i] * z[IDX2(i,j,S_size)];
-}
-
-__global__
-void kernel_reduce(
-  const int S_size, const int M_size, const int L_size,
-  const double * __restrict__ r,
-  double * __restrict__ sum
-)
-{
-  const int k = blockIdx.x / M_size;
-  const int j = blockIdx.x % M_size;
-  const int i = threadIdx.x;
-
-  extern __shared__ double totals[];
-
-  totals[i] = r[IDX3(i,j,k,S_size,M_size)];
-
-  for (int offset = blockDim.x / 2; offset > 0; offset /= 2)
-  {
-    __syncthreads();
-    if (i < offset)
-    {
-      totals[i] += + totals[i + offset];
-    }
-  }
-
-  if (i == 0)
-    sum[IDX2(j,k,M_size)] += totals[i];
-
-}
+/* Number of iterations to run benchmark */
+int ntimes = 100;
 
 int main(int argc, char *argv[])
 {
@@ -177,24 +99,38 @@ int main(int argc, char *argv[])
   parse_args(argc, argv);
 
   printf("Small arrays:  %d elements\t\t(%.1lf KB)\n",
-    S_size, S_size*sizeof(double)*1.0E-3);
+    Ni, Ni*sizeof(double)*1.0E-3);
 
-  printf("Medium arrays: %d x %d elements\t(%.1lf MB)\n",
-    S_size, M_size, S_size*M_size*sizeof(double)*1.0E-6);
+  printf("Medium arrays: %d x %d x %d x %d elements\t(%.1lf MB)\n"
+         "               %d x %d x %d x %d elements\t(%.1lf MB)\n"
+         "               %d x %d x %d x %d elements\t(%.1lf MB)\n",
+    Ni, Nj, Nk, Nm, Ni*Nj*Nk*Nm*sizeof(double)*1.0E-6,
+    Ni, Nj, Nl, Nm, Ni*Nj*Nl*Nm*sizeof(double)*1.0E-6,
+    Ni, Nk, Nl, Nm, Ni*Nk*Nl*Nm*sizeof(double)*1.0E-6);
 
-  printf("Large arrays:  %d x %d x %d elements\t(%.1lf MB)\n",
-    S_size, M_size, L_size, S_size*M_size*L_size*sizeof(double)*1.0E-6);
+  printf("Large arrays:  %d x %d x %d x %d x %d elements\t(%.1lf MB)\n",
+    Ni, Nj, Nk, Nl, Nm, Ni*Nj*Nk*Nl*Nm*sizeof(double)*1.0E-6);
 
   const double footprint = (double)sizeof(double) * 1.0E-6 * (
-    2.0*L_size*M_size*S_size +   /* r, q */
-    3.0*M_size*S_size +          /* x, y, z */
-    3.0*S_size +                 /* a, b, c */
-    L_size*M_size                /* sum */
+    2.0*Ni*Nj*Nk*Nl*Nm +  /* r, q */
+    Ni*Nj*Nk*Nm +         /* x */
+    Ni*Nj*Nl*Nm +         /* y */
+    Ni*Nk*Nl*Nm +         /* z */
+    3.0*Ni +              /* a, b, c */
+    Nj*Nk*Nl*Nm           /* sum */
     );
   printf("Memory footprint: %.1lf MB\n", footprint);
 
   /* Total memory moved - the arrays plus an extra sum as update is += */
-  const double size = footprint + (double)sizeof(double) * L_size*M_size * 1.0E-6;
+  const double moved = (double)sizeof(double) * 1.0E-6 * (
+    Ni*Nj*Nk*Nl*Nm  + /* read q */
+    Ni*Nj*Nk*Nl*Nm  + /* write r */
+    Ni + Ni + Ni    + /* read a, b and c */
+    2.0*Ni*Nj*Nk*Nm + /* read and write x */
+    2.0*Ni*Nj*Nl*Nm + /* read and write y */
+    2.0*Ni*Nk*Nl*Nm + /* read and write z */
+    2.0*Nj*Nk*Nl*Nm   /* read and write sum */
+  );
 
   printf("Running %d times\n", ntimes);
 
@@ -202,211 +138,188 @@ int main(int argc, char *argv[])
 
   double timings[ntimes];
 
+  double *q = (double *)malloc(sizeof(double)*Ni*Nj*Nk*Nl*Nm);
+  double *r = (double *)malloc(sizeof(double)*Ni*Nj*Nk*Nl*Nm);
 
-  double *q = (double*)malloc(sizeof(double)*L_size*M_size*S_size);
-  double *r = (double*)malloc(sizeof(double)*L_size*M_size*S_size);
+  double *x = (double *)malloc(sizeof(double)*Ni*Nj*Nk*Nm);
+  double *y = (double *)malloc(sizeof(double)*Ni*Nj*Nl*Nm);
+  double *z = (double *)malloc(sizeof(double)*Ni*Nk*Nl*Nm);
 
-  double *x = (double*)malloc(sizeof(double)*M_size*S_size);
-  double *y = (double*)malloc(sizeof(double)*M_size*S_size);
-  double *z = (double*)malloc(sizeof(double)*M_size*S_size);
+  double *a = (double *)malloc(sizeof(double)*Ni);
+  double *b = (double *)malloc(sizeof(double)*Ni);
+  double *c = (double *)malloc(sizeof(double)*Ni);
 
-  double *a = (double*)malloc(sizeof(double)*S_size);
-  double *b = (double*)malloc(sizeof(double)*S_size);
-  double *c = (double*)malloc(sizeof(double)*S_size);
-
-  double *sum = (double*)malloc(sizeof(double)*L_size*M_size);
+  double *sum = (double *)malloc(sizeof(double)*Nj*Nk*Nl*Nm);
 
   /* Initalise the data */
+  #pragma omp parallel
   {
-    for (int k = 0; k < L_size; k++)
-    {
-      for (int j = 0; j < M_size; j++)
-      {
-        for (int i = 0; i < S_size; i++)
-        {
-          q[IDX3(i,j,k,S_size,M_size)] = 0.1;
-          r[IDX3(i,j,k,S_size,M_size)] = 0.0;
+    /* q and r */
+    #pragma omp for
+    for (int m = 0; m < Nm; m++) {
+      for (int l = 0; l < Nl; l++) {
+        for (int k = 0; k < Nk; k++) {
+          for (int j = 0; j < Nj; j++) {
+            for (int i = 0; i < Ni; i++) {
+              q[IDX5(i,j,k,l,m,Ni,Nj,Nk,Nl)] = Q_START;
+              r[IDX5(i,j,k,l,m,Ni,Nj,Nk,Nl)] = R_START;
+            }
+          }
         }
       }
     }
 
-    for (int j = 0; j < M_size; j++)
-    {
-      for (int i = 0; i < S_size; i++)
-      {
-        x[IDX2(i,j,S_size)] = 0.2;
-        y[IDX2(i,j,S_size)] = 0.3;
-        z[IDX2(i,j,S_size)] = 0.4;
+    /* x */
+    #pragma omp for
+    for (int m = 0; m < Nm; m++) {
+      for (int k = 0; k < Nk; k++) {
+        for (int j = 0; j < Nj; j++) {
+          for (int i = 0; i < Ni; i++) {
+            x[IDX4(i,j,k,m,Ni,Nj,Nk)] = X_START;
+          }
+        }
       }
     }
 
-    for (int i = 0; i < S_size; i++)
-    {
-      a[i] = 0.6;
-      b[i] = 0.7;
-      c[i] = 0.8;
-    }
-
-    for (int k = 0; k < L_size; k++)
-    {
-      for (int j = 0; j < M_size; j++)
-      {
-        sum[IDX2(j,k,M_size)] = 0.0;
+    /* y */
+    #pragma omp for
+    for (int m = 0; m < Nm; m++) {
+      for (int l = 0; l < Nl; l++) {
+        for (int j = 0; j < Nj; j++) {
+          for (int i = 0; i < Ni; i++) {
+            y[IDX4(i,j,l,m,Ni,Nj,Nl)] = Y_START;
+          }
+        }
       }
     }
+
+    /* z */
+    #pragma omp for
+    for (int m = 0; m < Nm; m++) {
+      for (int l = 0; l < Nl; l++) {
+        for (int k = 0; k < Nk; k++) {
+          for (int i = 0; i < Ni; i++) {
+            z[IDX4(i,k,l,m,Ni,Nk,Nl)] = Z_START;
+          }
+        }
+      }
+    }
+
+    /* a, b, and c */
+    #pragma omp for
+    for (int i = 0; i < Ni; i++) {
+      a[i] = A_START;
+      b[i] = B_START;
+      c[i] = C_START;
+    }
+
+    /* sum */
+    #pragma omp for
+    for (int m = 0; m < Nm; m++) {
+      for (int l = 0; l < Nl; l++) {
+        for (int k = 0; k < Nk; k++) {
+          for (int j = 0; j < Nj; j++) {
+            sum[IDX4(j,k,l,m,Nj,Nk,Nl)] = 0.0;
+          }
+        }
+      }
+    }
+  } /* End of parallel region */
+
+  /* Copy to CUDA */
+  double *d_q, *d_r, *d_x, *d_y, *d_z, *d_a, *d_b, *d_c, *d_sum;
+  cudaMalloc(&d_q, sizeof(double)*Ni*Nj*Nk*Nl*Nm);
+  cudaMalloc(&d_r, sizeof(double)*Ni*Nj*Nk*Nl*Nm);
+  cudaMalloc(&d_x, sizeof(double)*Ni*Nj*Nk*Nm);
+  cudaMalloc(&d_y, sizeof(double)*Ni*Nj*Nl*Nm);
+  cudaMalloc(&d_z, sizeof(double)*Ni*Nk*Nl*Nm);
+  cudaMalloc(&d_a, sizeof(double)*Ni);
+  cudaMalloc(&d_b, sizeof(double)*Ni);
+  cudaMalloc(&d_c, sizeof(double)*Ni);
+  cudaMalloc(&d_sum, sizeof(double)*Nj*Nk*Nl*Nm);
+  cudaMemcpy(d_q, q, sizeof(double)*Ni*Nj*Nk*Nl*Nm, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_r, r, sizeof(double)*Ni*Nj*Nk*Nl*Nm, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_x, x, sizeof(double)*Ni*Nj*Nk*Nm, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_y, y, sizeof(double)*Ni*Nj*Nl*Nm, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_z, z, sizeof(double)*Ni*Nk*Nl*Nm, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_a, a, sizeof(double)*Ni, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_b, b, sizeof(double)*Ni, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_c, c, sizeof(double)*Ni, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_sum, sum, sizeof(double)*Nj*Nk*Nl*Nm, cudaMemcpyHostToDevice);
+
+  /* Precompute the hyperplanes */
+  const int Nplanes = Nj + Nk + Nl - 2;
+  int *Ncells = (int *)malloc(sizeof(int)*Nplanes);
+  for (int p = 0; p < Nplanes; p++) Ncells[p] = 0;
+  for (int l = 0; l < Nl; l++)
+    for (int k = 0; k < Nk; k++)
+      for (int j = 0; j < Nj; j++)
+        Ncells[j+k+l] += 1;
+
+  int **planes = (int **)malloc(sizeof(int*)*Nplanes);
+  for (int p = 0; p < Nplanes; p++)
+    planes[p] = (int *)malloc(sizeof(int)*3*Ncells[p]);
+
+  int *index = (int *)malloc(sizeof(int)*Nplanes);
+  for (int p = 0; p < Nplanes; p++) index[p] = 0;
+
+  for (int l = 0; l < Nl; l++)
+    for (int k = 0; k < Nk; k++)
+      for (int j = 0; j < Nj; j++)
+      {
+        const int p = j+k+l;
+        planes[p][IDX2(index[p],0,Ncells[p])] = j;
+        planes[p][IDX2(index[p],1,Ncells[p])] = k;
+        planes[p][IDX2(index[p],2,Ncells[p])] = l;
+        index[p] += 1;
+      }
+
+  /* Copy to device */
+  int ** d_planes = (int **)malloc(sizeof(int*)*Nplanes);
+  for (int p = 0; p < Nplanes; p++)
+  {
+    cudaMalloc(d_planes+p, sizeof(int)*3*Ncells[p]);
+    cudaMemcpy(d_planes[p], planes[p], sizeof(int)*3*Ncells[p], cudaMemcpyHostToDevice);
   }
 
-  /* Device memory */
-  double *d_r, *d_q, *d_x, *d_y, *d_z, *d_a, *d_b, *d_c, *d_sum;
-  cudaMalloc(&d_r, sizeof(double)*L_size*M_size*S_size);
-  check_error(__LINE__);
-  cudaMalloc(&d_q, sizeof(double)*L_size*M_size*S_size);
-  check_error(__LINE__);
-  cudaMalloc(&d_x, sizeof(double)*M_size*S_size);
-  check_error(__LINE__);
-  cudaMalloc(&d_y, sizeof(double)*M_size*S_size);
-  check_error(__LINE__);
-  cudaMalloc(&d_z, sizeof(double)*M_size*S_size);
-  check_error(__LINE__);
-  cudaMalloc(&d_a, sizeof(double)*S_size);
-  check_error(__LINE__);
-  cudaMalloc(&d_b, sizeof(double)*S_size);
-  check_error(__LINE__);
-  cudaMalloc(&d_c, sizeof(double)*S_size);
-  check_error(__LINE__);
-  cudaMalloc(&d_sum, sizeof(double)*M_size*L_size);
-  check_error(__LINE__);
-
-  cudaMemcpy(d_r, r, sizeof(double)*L_size*M_size*S_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
-  cudaMemcpy(d_q, q, sizeof(double)*L_size*M_size*S_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
-  cudaMemcpy(d_x, x, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
-  cudaMemcpy(d_y, y, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
-  cudaMemcpy(d_z, z, sizeof(double)*M_size*S_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
-  cudaMemcpy(d_a, a, sizeof(double)*S_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
-  cudaMemcpy(d_b, b, sizeof(double)*S_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
-  cudaMemcpy(d_c, c, sizeof(double)*S_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
-  cudaMemcpy(d_sum, sum, sizeof(double)*M_size*L_size, cudaMemcpyHostToDevice);
-  check_error(__LINE__);
+  cudaDeviceSynchronize();
 
   /* Run the kernel multiple times */
-  for (int t = 0; t < ntimes; t++)
-  {
-    struct timeval timstr;
-    gettimeofday(&timstr, 0);
-    double tick = timstr.tv_sec + (timstr.tv_usec / 1000000.0);
+  for (int t = 0; t < ntimes; t++) {
+    double tick = omp_get_wtime();
 
-    int blocks = M_size*L_size;
-    int threads = S_size;
+    kernel(Ni,Nj,Nk,Nl,Nm,d_r,d_q,d_x,d_y,d_z,d_a,d_b,d_c,d_sum,Nplanes,d_planes,Ncells);
 
-    if (!split)
-    {
-      kernel<<<blocks, threads, sizeof(double)*S_size>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c, d_sum);
-      check_error(__LINE__);
-    }
-    else
-    {
-      int workers = 256;
-      int work = (L_size*M_size*S_size) / workers;
+    /* Swap the pointers */
+    double *tmp = d_q; d_q = d_r; d_r = tmp;
 
-      kernel_compute<<<work, workers>>>(S_size, M_size, L_size, d_r, d_q, d_x, d_y, d_z, d_a, d_b, d_c);
-      check_error(__LINE__);
-
-      kernel_reduce<<<blocks, threads, sizeof(double)*S_size>>>(S_size, M_size, L_size, d_r, d_sum);
-      check_error(__LINE__);
-    }
-
-    cudaDeviceSynchronize();
-    check_error(__LINE__);
-
-    gettimeofday(&timstr, 0);
-    double tock = timstr.tv_sec + (timstr.tv_usec / 1000000.0);
-
+    double tock = omp_get_wtime();
     timings[t] = tock-tick;
 
   }
 
-  /* Check the results */
-  const double gold = 0.1 + 0.2*0.6 + 0.3*0.7 + 0.4*0.8;
-  const double gold_sum = gold*S_size*ntimes;
-
-  /* Copy back memory */
-  cudaMemcpy(r, d_r, sizeof(double)*L_size*M_size*S_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-  cudaMemcpy(q, d_q, sizeof(double)*L_size*M_size*S_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-  cudaMemcpy(x, d_x, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-  cudaMemcpy(y, d_y, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-  cudaMemcpy(z, d_z, sizeof(double)*M_size*S_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-  cudaMemcpy(a, d_a, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-  cudaMemcpy(b, d_b, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-  cudaMemcpy(c, d_c, sizeof(double)*S_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-  cudaMemcpy(sum, d_sum, sizeof(double)*M_size*L_size, cudaMemcpyDeviceToHost);
-  check_error(__LINE__);
-
-  /* Check the r array */
-  for (int k = 0; k < L_size; k++)
-    for (int j = 0; j < M_size; j++)
-      for (int i = 0; i < S_size; i++)
-      {
-        if (fabs(r[IDX3(i,j,k,S_size,M_size)]-gold) > TOLR)
-        {
-          printf("Results incorrect - at (%d,%d,%d), %lf should be %lf\n",
-            i,j,k, r[IDX3(i,j,k,S_size,M_size)], gold);
-          goto sumcheck;
-        }
-      }
-
-sumcheck:
-  /* Check the reduction array */
-  for (int i = 0; i < L_size*M_size; i++)
-  {
-    if (fabs(sum[i]-gold_sum) > TOLR)
-    {
-      printf("Reduction incorrect - at %d, %lf should be %lf\n",
-        i, sum[i], gold_sum);
-      break;
-    }
-  }
+  /* Check the results - total of the sum array */
+  double total = 0.0;
+  for (int i = 0; i < Nj*Nk*Nl*Nm; i++)
+    total += sum[i];
+  printf("Sum total: %lf\n", total);
 
   /* Print timings */
   double min = DBL_MAX;
   double max = 0.0;
   double avg = 0.0;
-  for (int t = 1; t < ntimes; t++)
-  {
+  for (int t = 1; t < ntimes; t++) {
     min = MIN(min, timings[t]);
     max = MAX(max, timings[t]);
     avg += timings[t];
   }
   avg /= (double)(ntimes - 1);
 
+  printf("\n");
   printf("Bandwidth MB/s  Min time    Max time    Avg time\n");
-  printf("%12.1f %11.6f %11.6f %11.6f\n", size/min, min, max, avg);
+  printf("%12.1f %11.6f %11.6f %11.6f\n", moved/min, min, max, avg);
 
   /* Free memory */
-  cudaFree(d_q);
-  cudaFree(d_r);
-  cudaFree(d_x);
-  cudaFree(d_y);
-  cudaFree(d_z);
-  cudaFree(d_a);
-  cudaFree(d_b);
-  cudaFree(d_c);
-  cudaFree(d_sum);
   free(q);
   free(r);
   free(x);
@@ -421,27 +334,114 @@ sumcheck:
 
 }
 
+/**************************************************************************
+ * Kernel
+ *************************************************************************/
+/* Ni and Nm are threads in the thread block. One thread block per cell on the slice */
+__global__
+void slice_kernel(
+  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
+  const int Ncells,
+  double * __restrict__ r,
+  const double * __restrict__ q,
+  double * __restrict__ x,
+  double * __restrict__ y,
+  double * __restrict__ z,
+  const double * __restrict__ a,
+  const double * __restrict__ b,
+  const double * __restrict__ c,
+  const int * __restrict__ cells
+)
+{
+  const int gidx = threadIdx.x + blockIdx.x * blockDim.x;
+  const int gidy = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (gidx > Ni*Nm) return;
+  if (gidy > Ncells) return;
+
+  const int i = gidx % Ni;
+  const int m = gidx / Ni;
+  const int j = cells[IDX2(gidy,0,Ncells)];
+  const int k = cells[IDX2(gidy,1,Ncells)];
+  const int l = cells[IDX2(gidy,2,Ncells)];
+
+  /* Set r */
+  double tmp_r =
+    q[IDX5(i,m,j,k,l,Ni,Nm,Nj,Nk)] +
+    a[i] * x[IDX4(i,m,j,k,Ni,Nm,Nj)] +
+    b[i] * y[IDX4(i,m,j,l,Ni,Nm,Nj)] +
+    c[i] * z[IDX4(i,m,k,l,Ni,Nm,Nk)];
+
+  /* Update x, y, z */
+  x[IDX4(i,m,j,k,Ni,Nm,Nj)] = 0.2*tmp_r - x[IDX4(i,m,j,k,Ni,Nm,Nj)];
+  y[IDX4(i,m,j,l,Ni,Nm,Nj)] = 0.2*tmp_r - y[IDX4(i,m,j,l,Ni,Nm,Nj)];
+  z[IDX4(i,m,k,l,Ni,Nm,Nk)] = 0.2*tmp_r - z[IDX4(i,m,k,l,Ni,Nm,Nk)];
+
+  /* Save r */
+  r[IDX5(i,m,j,k,l,Ni,Nm,Nj,Nk)] = tmp_r;
+}
+
+__global__
+void reduce_kernel(
+  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
+  const double * __restrict__ r,
+  double * __restrict__ sum
+)
+{
+  extern __shared__ double local[];
+  const int i = threadIdx.x;
+}
+
+void kernel(
+  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
+  double * __restrict__ r,
+  const double * __restrict__ q,
+  double * __restrict__ x,
+  double * __restrict__ y,
+  double * __restrict__ z,
+  const double * __restrict__ a,
+  const double * __restrict__ b,
+  const double * __restrict__ c,
+  double * __restrict__ sum,
+  const int Nplanes,
+  int ** __restrict__ planes,
+  int * __restrict__ Ncells
+  )
+{
+
+  const int bsize = 16;
+  for (int p = 0; p < Nplanes; p++)
+  {
+    dim3 blocks(ceil(Ni*Nm/(double)bsize), ceil(Ncells[p]/(double)bsize), 1);
+    dim3 threads(bsize, bsize, 1);
+    slice_kernel<<<blocks, threads>>>(Ni,Nj,Nk,Nl,Nm,Ncells[p],r,q,x,y,z,a,b,c,planes[p]);
+  }
+  cudaDeviceSynchronize();
+
+}
+
 void parse_args(int argc, char *argv[])
 {
   for (int i = 1; i < argc; i++)
   {
-    if (strcmp(argv[i], "--large") == 0)
+    if (strcmp(argv[i], "--outer") == 0)
     {
-      L_size = atoi(argv[++i]);
+      Nm = atoi(argv[++i]);
     }
-    else if (strcmp(argv[i], "--medium") == 0)
+    else if (strcmp(argv[i], "--inner") == 0)
     {
-      M_size = atoi(argv[++i]);
+      Ni = atoi(argv[++i]);
     }
-    else if (strcmp(argv[i], "--small") == 0)
+    else if (strcmp(argv[i], "--middle") == 0)
     {
-      S_size = atoi(argv[++i]);
+      int num = atoi(argv[++i]);
+      Nj = num;
+      Nk = num;
+      Nl = num;
     }
-    else if (strcmp(argv[i], "--swap") == 0)
+    else if (strcmp(argv[i], "--Nj") == 0)
     {
-      int tmp = L_size;
-      L_size = M_size;
-      M_size = tmp;
+      Nj = atoi(argv[++i]);
     }
     else if (strcmp(argv[i], "--ntimes") == 0)
     {
@@ -452,24 +452,18 @@ void parse_args(int argc, char *argv[])
         exit(EXIT_FAILURE);
       }
     }
-    else if (strcmp(argv[i], "--split") == 0)
-    {
-      split = true;
-      printf("Using split kernels\n");
-    }
     else if (strcmp(argv[i], "--help") == 0)
     {
       printf("Usage: %s [OPTION]\n", argv[0]);
-      printf("\t --large n \tSet size of large dimension\n");
-      printf("\t --medium n \tSet size of medium dimension\n");
-      printf("\t --small n \tSet size of small dimension\n");
-      printf("\t --swap\tSwap medium and large sizes over\n");
+      printf("\t --outer  n \tSet size of outer dimension\n");
+      printf("\t --inner  n \tSet size of middle dimensions\n");
+      printf("\t --middle n \tSet size of inner dimension\n");
+      printf("\t --Nj     n \tSet size of the j dimension\n");
       printf("\t --ntimes n\tRun the benchmark n times\n");
-      printf("\t --split n\tSplit compute and reduction kernels\n");
       printf("\n");
-      printf("\t Large  is %12d elements\n", LARGE);
-      printf("\t Medium is %12d elements\n", MEDIUM);
-      printf("\t Small  is %12d elements\n", SMALL);
+      printf("\t Outer   is %12d elements\n", OUTER);
+      printf("\t Middle are %12d elements\n", MIDDLE);
+      printf("\t Inner   is %12d elements\n", INNER);
       exit(EXIT_SUCCESS);
     }
     else
@@ -479,14 +473,3 @@ void parse_args(int argc, char *argv[])
     }
   }
 }
-
-void check_error(int line)
-{
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess)
-  {
-    fprintf(stderr, "Error on line %d: %s\n", line, cudaGetErrorString(err));
-    exit(EXIT_FAILURE);
-  }
-}
-
