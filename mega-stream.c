@@ -18,17 +18,12 @@
   along with mega-stream.  If not, see <http://www.gnu.org/licenses/>.
 
 
-  This aims to test the theory that streaming many large arrays causes memory
-  bandwidth limits not to be reached, and latency becomes a dominating factor.
-  We run a kernel with a similar form to the original triad, but with more than
-  3 input arrays.
+  This aims to investigate the limiting factor for a simple kernel, in particular
+  where bandwidth limits not to be reached, and latency becomes a dominating factor.
 
-  The main kernel computes:
-  r(i,j,k) = q(i,j,k) + a(i)*x(i,j) + b(i)*y(i,j) + c(i)*z(i,j)
-  sum(j,k) = SUM(r(:,j,k))
 */
 
-#define VERSION "0.2.1"
+#define VERSION "0.3"
 
 #include <float.h>
 #include <omp.h>
@@ -42,18 +37,19 @@
 
 #define IDX2(i,j,ni) ((i)+(ni)*(j))
 #define IDX3(i,j,k,ni,nj) ((i)+(ni)*IDX2((j),(k),(nj)))
+#define IDX4(i,j,k,l,ni,nj,nk) ((i)+(ni)*IDX3((j),(k),(l),(nj),(nk)))
+#define IDX5(i,j,k,l,m,ni,nj,nk,nl) ((i)+(ni)*IDX4((j),(k),(l),(m),(nj),(nk),(nl)))
 
 /*
-  Arrays are defined in terms of 3 sizes
-  The large arrays are of size SMALL*MEDIUM*LARGE and are indexed with 3 indicies.
-  The medium arrays are of size SMALL*MEDIUM and are indexed with 2 indicies.
-  The small arrays are of size SMALL and are indexed with 1 index.
+  Arrays are defined in terms of 3 sizes: inner, middle and outer.
+  The large arrays are of size inner*middle*middle*middle*outer.
+  The medium arrays are of size inner*middle*middle*outer.
+  The small arrays are of size inner and are indexed with 1 index.
 
-  By default the large array has 2^27 elements, and the small array has 64 elements (2^6).
 */
-#define LARGE  4096 // 2^12
-#define MEDIUM  512 // 2^9
-#define SMALL    64 // 2^6
+#define OUTER   64 // 3^6
+#define MIDDLE  16 // 2^4
+#define INNER  128 // 2^7
 
 /* Default alignment of 2 MB page boundaries */
 #define ALIGNMENT 2*1024*1024
@@ -61,11 +57,34 @@
 /* Tollerance with which to check final array values */
 #define TOLR 1.0E-15
 
+/* Starting values */
+#define R_START 0.0
+#define Q_START 0.01
+#define X_START 0.02
+#define Y_START 0.03
+#define Z_START 0.04
+#define A_START 0.06
+#define B_START 0.07
+#define C_START 0.08
+
+
+void kernel(
+  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
+  double * restrict r, const double * restrict q,
+  double * restrict x, double * restrict y, double * restrict z,
+  const double * restrict a, const double * restrict b, const double * restrict c,
+  double * restrict sum
+);
 void parse_args(int argc, char *argv[]);
 
-int L_size = LARGE;
-int M_size = MEDIUM;
-int S_size = SMALL;
+/* Default strides */
+int Ni = INNER;
+int Nj = MIDDLE;
+int Nk = MIDDLE;
+int Nl = MIDDLE;
+int Nm = OUTER;
+
+/* Number of iterations to run benchmark */
 int ntimes = 100;
 
 int main(int argc, char *argv[])
@@ -77,24 +96,38 @@ int main(int argc, char *argv[])
   parse_args(argc, argv);
 
   printf("Small arrays:  %d elements\t\t(%.1lf KB)\n",
-    S_size, S_size*sizeof(double)*1.0E-3);
+    Ni, Ni*sizeof(double)*1.0E-3);
 
-  printf("Medium arrays: %d x %d elements\t(%.1lf MB)\n",
-    S_size, M_size, S_size*M_size*sizeof(double)*1.0E-6);
+  printf("Medium arrays: %d x %d x %d x %d elements\t(%.1lf MB)\n"
+         "               %d x %d x %d x %d elements\t(%.1lf MB)\n"
+         "               %d x %d x %d x %d elements\t(%.1lf MB)\n",
+    Ni, Nj, Nk, Nm, Ni*Nj*Nk*Nm*sizeof(double)*1.0E-6,
+    Ni, Nj, Nl, Nm, Ni*Nj*Nl*Nm*sizeof(double)*1.0E-6,
+    Ni, Nk, Nl, Nm, Ni*Nk*Nl*Nm*sizeof(double)*1.0E-6);
 
-  printf("Large arrays:  %d x %d x %d elements\t(%.1lf MB)\n",
-    S_size, M_size, L_size, S_size*M_size*L_size*sizeof(double)*1.0E-6);
+  printf("Large arrays:  %d x %d x %d x %d x %d elements\t(%.1lf MB)\n",
+    Ni, Nj, Nk, Nl, Nm, Ni*Nj*Nk*Nl*Nm*sizeof(double)*1.0E-6);
 
   const double footprint = (double)sizeof(double) * 1.0E-6 * (
-    2.0*L_size*M_size*S_size +   /* r, q */
-    3.0*M_size*S_size +          /* x, y, z */
-    3.0*S_size +                 /* a, b, c */
-    L_size*M_size                /* sum */
+    2.0*Ni*Nj*Nk*Nl*Nm +  /* r, q */
+    Ni*Nj*Nk*Nm +         /* x */
+    Ni*Nj*Nl*Nm +         /* y */
+    Ni*Nk*Nl*Nm +         /* z */
+    3.0*Ni +              /* a, b, c */
+    Nj*Nk*Nl*Nm           /* sum */
     );
   printf("Memory footprint: %.1lf MB\n", footprint);
 
   /* Total memory moved - the arrays plus an extra sum as update is += */
-  const double size = footprint + (double)sizeof(double) * L_size*M_size * 1.0E-6;
+  const double moved = (double)sizeof(double) * 1.0E-6 * (
+    Ni*Nj*Nk*Nl*Nm  + /* read q */
+    Ni*Nj*Nk*Nl*Nm  + /* write r */
+    Ni + Ni + Ni    + /* read a, b and c */
+    2.0*Ni*Nj*Nk*Nm + /* read and write x */
+    2.0*Ni*Nj*Nl*Nm + /* read and write y */
+    2.0*Ni*Nk*Nl*Nm + /* read and write z */
+    2.0*Nj*Nk*Nl*Nm   /* read and write sum */
+  );
 
   printf("Running %d times\n", ntimes);
 
@@ -102,141 +135,152 @@ int main(int argc, char *argv[])
 
   double timings[ntimes];
 
+#ifdef __APPLE__
+  double *q;
+  posix_memalign(&q, ALIGNMENT, sizeof(double)*Ni*Nj*Nk*Nl*Nm);
+  double *r;
+  posix_memalign(&r, ALIGNMENT, sizeof(double)*Ni*Nj*Nk*Nl*Nm);
 
-  double *q = aligned_alloc(ALIGNMENT, sizeof(double)*L_size*M_size*S_size);
-  double *r = aligned_alloc(ALIGNMENT, sizeof(double)*L_size*M_size*S_size);
+  double *x;
+  posix_memalign(&x, ALIGNMENT, sizeof(double)*Ni*Nj*Nk*Nm);
+  double *y;
+  posix_memalign(&y, ALIGNMENT, sizeof(double)*Ni*Nj*Nl*Nm);
+  double *z;
+  posix_memalign(&z, ALIGNMENT, sizeof(double)*Ni*Nk*Nl*Nm);
 
-  double *x = aligned_alloc(ALIGNMENT, sizeof(double)*M_size*S_size);
-  double *y = aligned_alloc(ALIGNMENT, sizeof(double)*M_size*S_size);
-  double *z = aligned_alloc(ALIGNMENT, sizeof(double)*M_size*S_size);
+  double *a;
+  posix_memalign(&a, ALIGNMENT, sizeof(double)*Ni);
+  double *b;
+  posix_memalign(&b, ALIGNMENT, sizeof(double)*Ni);
+  double *c;
+  posix_memalign(&c, ALIGNMENT, sizeof(double)*Ni);
 
-  double *a = aligned_alloc(ALIGNMENT, sizeof(double)*S_size);
-  double *b = aligned_alloc(ALIGNMENT, sizeof(double)*S_size);
-  double *c = aligned_alloc(ALIGNMENT, sizeof(double)*S_size);
+  double *sum;
+  posix_memalign(&sum, ALIGNMENT, sizeof(double)*Nj*Nk*Nl*Nm);
+#else
+  double *q = aligned_alloc(ALIGNMENT, sizeof(double)*Ni*Nj*Nk*Nl*Nm);
+  double *r = aligned_alloc(ALIGNMENT, sizeof(double)*Ni*Nj*Nk*Nl*Nm);
 
-  double *sum = aligned_alloc(ALIGNMENT, sizeof(double)*L_size*M_size);
+  double *x = aligned_alloc(ALIGNMENT, sizeof(double)*Ni*Nj*Nk*Nm);
+  double *y = aligned_alloc(ALIGNMENT, sizeof(double)*Ni*Nj*Nl*Nm);
+  double *z = aligned_alloc(ALIGNMENT, sizeof(double)*Ni*Nk*Nl*Nm);
+
+  double *a = aligned_alloc(ALIGNMENT, sizeof(double)*Ni);
+  double *b = aligned_alloc(ALIGNMENT, sizeof(double)*Ni);
+  double *c = aligned_alloc(ALIGNMENT, sizeof(double)*Ni);
+
+  double *sum = aligned_alloc(ALIGNMENT, sizeof(double)*Nj*Nk*Nl*Nm);
+#endif
 
   /* Initalise the data */
   #pragma omp parallel
   {
+    /* q and r */
     #pragma omp for
-    for (int k = 0; k < L_size; k++)
-    {
-      for (int j = 0; j < M_size; j++)
-      {
-        for (int i = 0; i < S_size; i++)
-        {
-          q[IDX3(i,j,k,S_size,M_size)] = 0.1;
-          r[IDX3(i,j,k,S_size,M_size)] = 0.0;
+    for (int m = 0; m < Nm; m++) {
+      for (int l = 0; l < Nl; l++) {
+        for (int k = 0; k < Nk; k++) {
+          for (int j = 0; j < Nj; j++) {
+            for (int i = 0; i < Ni; i++) {
+              q[IDX5(i,j,k,l,m,Ni,Nj,Nk,Nl)] = Q_START;
+              r[IDX5(i,j,k,l,m,Ni,Nj,Nk,Nl)] = R_START;
+            }
+          }
         }
       }
     }
 
+    /* x */
     #pragma omp for
-    for (int j = 0; j < M_size; j++)
-    {
-      for (int i = 0; i < S_size; i++)
-      {
-        x[IDX2(i,j,S_size)] = 0.2;
-        y[IDX2(i,j,S_size)] = 0.3;
-        z[IDX2(i,j,S_size)] = 0.4;
+    for (int m = 0; m < Nm; m++) {
+      for (int k = 0; k < Nk; k++) {
+        for (int j = 0; j < Nj; j++) {
+          for (int i = 0; i < Ni; i++) {
+            x[IDX4(i,j,k,m,Ni,Nj,Nk)] = X_START;
+          }
+        }
       }
     }
 
+    /* y */
     #pragma omp for
-    for (int i = 0; i < S_size; i++)
-    {
-      a[i] = 0.6;
-      b[i] = 0.7;
-      c[i] = 0.8;
-    }
-
-    #pragma omp for
-    for (int k = 0; k < L_size; k++)
-    {
-      for (int j = 0; j < M_size; j++)
-      {
-        sum[IDX2(j,k,M_size)] = 0.0;
+    for (int m = 0; m < Nm; m++) {
+      for (int l = 0; l < Nl; l++) {
+        for (int j = 0; j < Nj; j++) {
+          for (int i = 0; i < Ni; i++) {
+            y[IDX4(i,j,l,m,Ni,Nj,Nl)] = Y_START;
+          }
+        }
       }
     }
-  }
+
+    /* z */
+    #pragma omp for
+    for (int m = 0; m < Nm; m++) {
+      for (int l = 0; l < Nl; l++) {
+        for (int k = 0; k < Nk; k++) {
+          for (int i = 0; i < Ni; i++) {
+            z[IDX4(i,k,l,m,Ni,Nk,Nl)] = Z_START;
+          }
+        }
+      }
+    }
+
+    /* a, b, and c */
+    #pragma omp for
+    for (int i = 0; i < Ni; i++) {
+      a[i] = A_START;
+      b[i] = B_START;
+      c[i] = C_START;
+    }
+
+    /* sum */
+    #pragma omp for
+    for (int m = 0; m < Nm; m++) {
+      for (int l = 0; l < Nl; l++) {
+        for (int k = 0; k < Nk; k++) {
+          for (int j = 0; j < Nj; j++) {
+            sum[IDX4(j,k,l,m,Nj,Nk,Nl)] = 0.0;
+          }
+        }
+      }
+    }
+  } /* End of parallel region */
 
   /* Run the kernel multiple times */
-  for (int t = 0; t < ntimes; t++)
-  {
+  for (int t = 0; t < ntimes; t++) {
     double tick = omp_get_wtime();
 
-    /**************************************************************************
-     * Kernel
-     *************************************************************************/
-    #pragma omp parallel for
-    for (int k = 0; k < L_size; k++)
-    {
-      for (int j = 0; j < M_size; j++)
-      {
-        double total = 0.0;
-        #pragma omp simd reduction(+:total) aligned(r,q,a,b,c,x,y,z: ALIGNMENT)
-        for (int i = 0; i < S_size; i++)
-        {
-          r[IDX3(i,j,k,S_size,M_size)] =
-            q[IDX3(i,j,k,S_size,M_size)]
-            + a[i] * x[IDX2(i,j,S_size)]
-            + b[i] * y[IDX2(i,j,S_size)]
-            + c[i] * z[IDX2(i,j,S_size)];
+    kernel(Ni,Nj,Nk,Nl,Nm,r,q,x,y,z,a,b,c,sum);
 
-          total += r[IDX3(i,j,k,S_size,M_size)];
-        }
-        sum[IDX2(j,k,M_size)] += total;
-      }
-    }
+    /* Swap the pointers */
+    double *tmp = q; q = r; r = tmp;
+
     double tock = omp_get_wtime();
     timings[t] = tock-tick;
 
   }
 
-  /* Check the results */
-  const double gold = 0.1 + 0.2*0.6 + 0.3*0.7 + 0.4*0.8;
-  const double gold_sum = gold*S_size*ntimes;
-
-  /* Check the r array */
-  for (int k = 0; k < L_size; k++)
-    for (int j = 0; j < M_size; j++)
-      for (int i = 0; i < S_size; i++)
-      {
-        if (fabs(r[IDX3(i,j,k,S_size,M_size)]-gold) > TOLR)
-        {
-          printf("Results incorrect - at (%d,%d,%d), %lf should be %lf\n",
-            i,j,k, r[IDX3(i,j,k,S_size,M_size)], gold);
-          goto sumcheck;
-        }
-      }
-
-sumcheck:
-  /* Check the reduction array */
-  for (int i = 0; i < L_size*M_size; i++)
-  {
-    if (fabs(sum[i]-gold_sum) > TOLR)
-    {
-      printf("Reduction incorrect - at %d, %lf should be %lf\n",
-        i, sum[i], gold_sum);
-      break;
-    }
-  }
+  /* Check the results - total of the sum array */
+  double total = 0.0;
+  for (int i = 0; i < Nj*Nk*Nl*Nm; i++)
+    total += sum[i];
+  printf("Sum total: %lf\n", total);
 
   /* Print timings */
   double min = DBL_MAX;
   double max = 0.0;
   double avg = 0.0;
-  for (int t = 1; t < ntimes; t++)
-  {
+  for (int t = 1; t < ntimes; t++) {
     min = MIN(min, timings[t]);
     max = MAX(max, timings[t]);
     avg += timings[t];
   }
   avg /= (double)(ntimes - 1);
 
+  printf("\n");
   printf("Bandwidth MB/s  Min time    Max time    Avg time\n");
-  printf("%12.1f %11.6f %11.6f %11.6f\n", size/min, min, max, avg);
+  printf("%12.1f %11.6f %11.6f %11.6f\n", moved/min, min, max, avg);
 
   /* Free memory */
   free(q);
@@ -253,27 +297,80 @@ sumcheck:
 
 }
 
+/**************************************************************************
+ * Kernel
+ *************************************************************************/
+void kernel(
+  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
+  double * restrict r,
+  const double * restrict q,
+  double * restrict x,
+  double * restrict y,
+  double * restrict z,
+  const double * restrict a,
+  const double * restrict b,
+  const double * restrict c,
+  double * restrict sum
+  )
+{
+  #pragma omp parallel for
+  for (int m = 0; m < Nm; m++) {
+    for (int l = 0; l < Nl; l++) {
+      for (int k = 0; k < Nk; k++) {
+        for (int j = 0; j < Nj; j++) {
+          double total = 0.0;
+          #pragma omp simd reduction(+:total)
+          for (int i = 0; i < Ni; i++) {
+            /* Set r */
+            double tmp_r =
+              q[IDX5(i,j,k,l,m,Ni,Nj,Nk,Nl)] +
+              a[i] * x[IDX4(i,j,k,m,Ni,Nj,Nk)] +
+              b[i] * y[IDX4(i,j,l,m,Ni,Nj,Nl)] +
+              c[i] * z[IDX4(i,k,l,m,Ni,Nk,Nl)];
+
+            /* Update x, y and z */
+            x[IDX4(i,j,k,m,Ni,Nj,Nk)] = 0.2*tmp_r - x[IDX4(i,j,k,m,Ni,Nj,Nk)];
+            y[IDX4(i,j,l,m,Ni,Nj,Nl)] = 0.2*tmp_r - y[IDX4(i,j,l,m,Ni,Nj,Nl)];
+            z[IDX4(i,k,l,m,Ni,Nk,Nl)] = 0.2*tmp_r - z[IDX4(i,k,l,m,Ni,Nk,Nl)];
+
+            /* Reduce over Ni */
+            total += tmp_r;
+
+            /* Save r */
+            r[IDX5(i,j,k,l,m,Ni,Nj,Nk,Nl)] = tmp_r;
+
+          } /* Ni */
+
+          sum[IDX4(j,k,l,m,Nj,Nk,Nl)] += total;
+
+        } /* Nj */
+      } /* Nk */
+    } /* Nl */
+  } /* Nm */
+}
+
 void parse_args(int argc, char *argv[])
 {
   for (int i = 1; i < argc; i++)
   {
-    if (strcmp(argv[i], "--large") == 0)
+    if (strcmp(argv[i], "--outer") == 0)
     {
-      L_size = atoi(argv[++i]);
+      Nm = atoi(argv[++i]);
     }
-    else if (strcmp(argv[i], "--medium") == 0)
+    else if (strcmp(argv[i], "--inner") == 0)
     {
-      M_size = atoi(argv[++i]);
+      Ni = atoi(argv[++i]);
     }
-    else if (strcmp(argv[i], "--small") == 0)
+    else if (strcmp(argv[i], "--middle") == 0)
     {
-      S_size = atoi(argv[++i]);
+      int num = atoi(argv[++i]);
+      Nj = num;
+      Nk = num;
+      Nl = num;
     }
-    else if (strcmp(argv[i], "--swap") == 0)
+    else if (strcmp(argv[i], "--Nj") == 0)
     {
-      int tmp = L_size;
-      L_size = M_size;
-      M_size = tmp;
+      Nj = atoi(argv[++i]);
     }
     else if (strcmp(argv[i], "--ntimes") == 0)
     {
@@ -287,15 +384,15 @@ void parse_args(int argc, char *argv[])
     else if (strcmp(argv[i], "--help") == 0)
     {
       printf("Usage: %s [OPTION]\n", argv[0]);
-      printf("\t --large n \tSet size of large dimension\n");
-      printf("\t --medium n \tSet size of medium dimension\n");
-      printf("\t --small n \tSet size of small dimension\n");
-      printf("\t --swap\tSwap medium and large sizes over\n");
+      printf("\t --outer  n \tSet size of outer dimension\n");
+      printf("\t --inner  n \tSet size of middle dimensions\n");
+      printf("\t --middle n \tSet size of inner dimension\n");
+      printf("\t --Nj     n \tSet size of the j dimension\n");
       printf("\t --ntimes n\tRun the benchmark n times\n");
       printf("\n");
-      printf("\t Large  is %12d elements\n", LARGE);
-      printf("\t Medium is %12d elements\n", MEDIUM);
-      printf("\t Small  is %12d elements\n", SMALL);
+      printf("\t Outer   is %12d elements\n", OUTER);
+      printf("\t Middle are %12d elements\n", MIDDLE);
+      printf("\t Inner   is %12d elements\n", INNER);
       exit(EXIT_SUCCESS);
     }
     else
