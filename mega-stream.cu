@@ -352,20 +352,20 @@ void slice_kernel(
   const double * __restrict__ a,
   const double * __restrict__ b,
   const double * __restrict__ c,
+  double * __restrict__ sum,
   const int * __restrict__ cells
 )
 {
+  extern __shared__ double local[];
   const int gidx = threadIdx.x + blockIdx.x * blockDim.x;
   const int gidy = threadIdx.y + blockIdx.y * blockDim.y;
+  const int gidz = threadIdx.z + blockIdx.z * blockDim.z;
 
-  if (gidx >= Ni*Nm) return;
-  if (gidy >= Ncells) return;
-
-  const int i = gidx % Ni;
-  const int m = gidx / Ni;
-  const int j = cells[IDX2(gidy,0,Ncells)];
-  const int k = cells[IDX2(gidy,1,Ncells)];
-  const int l = cells[IDX2(gidy,2,Ncells)];
+  const int i = gidx;
+  const int m = gidy;
+  const int j = cells[IDX2(gidz,0,Ncells)];
+  const int k = cells[IDX2(gidz,1,Ncells)];
+  const int l = cells[IDX2(gidz,2,Ncells)];
 
   /* Set r */
   double tmp_r =
@@ -381,6 +381,22 @@ void slice_kernel(
 
   /* Save r */
   r[IDX5(i,m,j,k,l,Ni,Nm,Nj,Nk)] = tmp_r;
+
+  /* Reduce to sum */
+  local[i] = tmp_r;
+  __syncthreads();
+
+  for (unsigned int offset = blockDim.x / 2; offset > 0; offset /= 2)
+  {
+    if (i < offset)
+    {
+      local[i] += local[i+offset];
+    }
+    __syncthreads();
+  }
+
+  if (i == 0)
+    sum[IDX4(j,k,l,m,Nj,Nk,Nl)] += local[0];
 }
 
 __global__
@@ -428,15 +444,12 @@ void kernel(
   )
 {
 
-  const int bsize = 8;
   for (int p = 0; p < Nplanes; p++)
   {
-    dim3 blocks(ceil(Ni*Nm/(double)bsize), ceil(Ncells[p]/(double)bsize), 1);
-    dim3 threads(bsize, bsize, 1);
-    slice_kernel<<<blocks, threads>>>(Ni,Nj,Nk,Nl,Nm,Ncells[p],r,q,x,y,z,a,b,c,planes[p]);
+    dim3 blocks(1, Nm, Ncells[p]);
+    dim3 threads(Ni, 1, 1);
+    slice_kernel<<<blocks, threads,sizeof(double)*Ni>>>(Ni,Nj,Nk,Nl,Nm,Ncells[p],r,q,x,y,z,a,b,c,sum,planes[p]);
   }
-  int blocks = Nj*Nk*Nl*Nm;
-  reduce_kernel<<<blocks,Ni,Ni*sizeof(double)>>>(Ni,Nj,Nk,Nl,Nm,r,sum);
   cudaDeviceSynchronize();
 
 }
