@@ -298,6 +298,8 @@ int main(int argc, char *argv[])
 
   }
 
+  cudaMemcpy(sum, d_sum, sizeof(double)*Nj*Nk*Nl*Nm, cudaMemcpyDeviceToHost);
+
   /* Check the results - total of the sum array */
   double total = 0.0;
   for (int i = 0; i < Nj*Nk*Nl*Nm; i++)
@@ -356,8 +358,8 @@ void slice_kernel(
   const int gidx = threadIdx.x + blockIdx.x * blockDim.x;
   const int gidy = threadIdx.y + blockIdx.y * blockDim.y;
 
-  if (gidx > Ni*Nm) return;
-  if (gidy > Ncells) return;
+  if (gidx >= Ni*Nm) return;
+  if (gidy >= Ncells) return;
 
   const int i = gidx % Ni;
   const int m = gidx / Ni;
@@ -384,12 +386,29 @@ void slice_kernel(
 __global__
 void reduce_kernel(
   const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
-  const double * __restrict__ r,
+  double * __restrict__ r,
   double * __restrict__ sum
 )
 {
   extern __shared__ double local[];
-  const int i = threadIdx.x;
+  const int idx = threadIdx.x;
+  const int gidy = blockDim.x*blockIdx.x;
+
+  local[idx] = r[idx+gidy];
+
+  __syncthreads();
+
+  for (unsigned int offset = blockDim.x / 2; offset > 0; offset /= 2)
+  {
+    if (idx < offset)
+    {
+      local[idx] += local[idx+offset];
+    }
+    __syncthreads();
+  }
+
+  if (idx == 0)
+    sum[blockIdx.x] += local[0];
 }
 
 void kernel(
@@ -409,13 +428,15 @@ void kernel(
   )
 {
 
-  const int bsize = 16;
+  const int bsize = 8;
   for (int p = 0; p < Nplanes; p++)
   {
     dim3 blocks(ceil(Ni*Nm/(double)bsize), ceil(Ncells[p]/(double)bsize), 1);
     dim3 threads(bsize, bsize, 1);
     slice_kernel<<<blocks, threads>>>(Ni,Nj,Nk,Nl,Nm,Ncells[p],r,q,x,y,z,a,b,c,planes[p]);
   }
+  int blocks = Nj*Nk*Nl*Nm;
+  reduce_kernel<<<blocks,Ni,Ni*sizeof(double)>>>(Ni,Nj,Nk,Nl,Nm,r,sum);
   cudaDeviceSynchronize();
 
 }
