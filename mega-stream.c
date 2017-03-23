@@ -70,10 +70,15 @@
 
 void kernel(
   const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
-  double * restrict r, const double * restrict q,
-  double * restrict x, double * restrict y, double * restrict z,
-  const double * restrict a, const double * restrict b, const double * restrict c,
-  double * restrict sum
+  double (* restrict r)[Nl][Nk][Nj][Ni],
+  const double (* restrict q)[Nl][Nk][Nj][Ni],
+  double (* restrict x)[Nk][Nj][Ni],
+  double (* restrict y)[Nl][Nj][Ni],
+  double (* restrict z)[Nl][Nm][Ni],
+  const double * restrict a,
+  const double * restrict b,
+  const double * restrict c,
+  double (* restrict sum)[Nl][Nk][Nj]
 );
 void parse_args(int argc, char *argv[]);
 
@@ -252,7 +257,15 @@ int main(int argc, char *argv[])
   for (int t = 0; t < ntimes; t++) {
     double tick = omp_get_wtime();
 
-    kernel(Ni,Nj,Nk,Nl,Nm,r,q,x,y,z,a,b,c,sum);
+    kernel(Ni,Nj,Nk,Nl,Nm,
+      (double (*)[Nl][Nk][Nj][Ni]) r,
+      (const double (*)[Nl][Nk][Nj][Ni]) q,
+      (double (*)[Nk][Nj][Ni]) x,
+      (double (*)[Nl][Nj][Ni]) y,
+      (double (*)[Nl][Nk][Ni]) z,
+      a,b,c,
+      (double (*)[Nl][Nk][Nj]) sum
+    );
 
     /* Swap the pointers */
     double *tmp = q; q = r; r = tmp;
@@ -306,15 +319,15 @@ int main(int argc, char *argv[])
  *************************************************************************/
 void kernel(
   const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
-  double * restrict r,
-  const double * restrict q,
-  double * restrict x,
-  double * restrict y,
-  double * restrict z,
+  double (* restrict r)[Nl][Nk][Nj][Ni],
+  const double (* restrict q)[Nl][Nk][Nj][Ni],
+  double (* restrict x)[Nk][Nj][Ni],
+  double (* restrict y)[Nl][Nj][Ni],
+  double (* restrict z)[Nl][Nm][Ni],
   const double * restrict a,
   const double * restrict b,
   const double * restrict c,
-  double * restrict sum
+  double (* restrict sum)[Nl][Nk][Nj]
   )
 {
   #pragma omp parallel for
@@ -327,25 +340,25 @@ void kernel(
           for (int i = 0; i < Ni; i++) {
             /* Set r */
             double tmp_r =
-              q[IDX5(i,j,k,l,m,Ni,Nj,Nk,Nl)] +
-              a[i] * x[IDX4(i,j,k,m,Ni,Nj,Nk)] +
-              b[i] * y[IDX4(i,j,l,m,Ni,Nj,Nl)] +
-              c[i] * z[IDX4(i,k,l,m,Ni,Nk,Nl)];
+              q[m][l][k][j][i] +
+              a[i] * x[m][k][j][i] +
+              b[i] * y[m][l][j][i] +
+              c[i] * z[m][l][k][i];
 
             /* Update x, y and z */
-            x[IDX4(i,j,k,m,Ni,Nj,Nk)] = 0.2*tmp_r - x[IDX4(i,j,k,m,Ni,Nj,Nk)];
-            y[IDX4(i,j,l,m,Ni,Nj,Nl)] = 0.2*tmp_r - y[IDX4(i,j,l,m,Ni,Nj,Nl)];
-            z[IDX4(i,k,l,m,Ni,Nk,Nl)] = 0.2*tmp_r - z[IDX4(i,k,l,m,Ni,Nk,Nl)];
+            x[m][k][j][i] = 0.2*tmp_r - x[m][k][j][i];
+            y[m][l][j][i] = 0.2*tmp_r - y[m][l][j][i];
+            z[m][l][k][i] = 0.2*tmp_r - z[m][l][k][i];
 
             /* Reduce over Ni */
             total += tmp_r;
 
             /* Save r */
-            r[IDX5(i,j,k,l,m,Ni,Nj,Nk,Nl)] = tmp_r;
+            r[m][l][k][j][i] = tmp_r;
 
           } /* Ni */
 
-          sum[IDX4(j,k,l,m,Nj,Nk,Nl)] += total;
+          sum[m][l][k][j] += total;
 
         } /* Nj */
       } /* Nk */
