@@ -69,9 +69,13 @@ PROGRAM megastream
 
   ! Arrays
   REAL(8), DIMENSION(:,:,:,:,:,:), POINTER :: q, r, ptr_tmp
+  TYPE(C_PTR) :: q_pt, r_pt
   REAL(8), DIMENSION(:,:,:,:,:), ALLOCATABLE :: x, y, z
+  TYPE(C_PTR) :: x_pt, y_pt, z_pt
   REAL(8), DIMENSION(:,:), ALLOCATABLE :: a, b, c
+  TYPE(C_PTR) :: a_pt, b_pt, c_pt
   REAL(8), DIMENSION(:,:,:,:), ALLOCATABLE :: total
+  TYPE(C_PTR) :: total_pt
 
   REAL(8), DIMENSION(:), ALLOCATABLE :: timings
   REAL(8) :: tick, tock
