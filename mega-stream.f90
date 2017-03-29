@@ -119,16 +119,25 @@ PROGRAM megastream
   WRITE(*, '(a,I,a,I)') 'Inner dimension split into ', Ng, ' chunks of size ', VLEN
 
   ! Allocate memory
-  NULLIFY(q, r)
-  ALLOCATE(q(VLEN,Nj,Nk,Nl,Ng,Nm))
-  ALLOCATE(r(VLEN,Nj,Nk,Nl,Ng,Nm))
-  ALLOCATE(x(VLEN,Nj,Nk,Ng,Nm))
-  ALLOCATE(y(VLEN,Nj,Nl,Ng,Nm))
-  ALLOCATE(z(VLEN,Nk,Nl,Ng,Nm))
-  ALLOCATE(a(VLEN,Ng))
-  ALLOCATE(b(VLEN,Ng))
-  ALLOCATE(c(VLEN,Ng))
-  ALLOCATE(total(Nj,Nk,Nl,Nm))
+  q_pt = ALLOC(VLEN*Nj*Nk*Nl*Ng*Nm)
+  r_pt = ALLOC(VLEN*Nj*Nk*Nl*Ng*Nm)
+  x_pt = ALLOC(VLEN*Nj*Nk*Ng*Nm)
+  y_pt = ALLOC(VLEN*Nj*Nl*Ng*Nm)
+  z_pt = ALLOC(VLEN*Nk*Nl*Ng*Nm)
+  a_pt = ALLOC(VLEN*Ng)
+  b_pt = ALLOC(VLEN*Ng)
+  c_pt = ALLOC(VLEN*Ng)
+  total_pt = ALLOC(Nj*Nk*Nl*Nm)
+
+  CALL C_F_POINTER(q_pt, q, (/VLEN,Nj,Nk,Nl,Ng,Nm/))
+  CALL C_F_POINTER(r_pt, r, (/VLEN,Nj,Nk,Nl,Ng,Nm/))
+  CALL C_F_POINTER(x_pt, x, (/VLEN,Nj,Nk,Ng,Nm/))
+  CALL C_F_POINTER(y_pt, y, (/VLEN,Nj,Nl,Ng,Nm/))
+  CALL C_F_POINTER(z_pt, z, (/VLEN,Nk,Nl,Ng,Nm/))
+  CALL C_F_POINTER(a_pt, a, (/VLEN,Ng/))
+  CALL C_F_POINTER(b_pt, b, (/VLEN,Ng/))
+  CALL C_F_POINTER(c_pt, c, (/VLEN,Ng/))
+  CALL C_F_POINTER(total_pt, total, (/Nj,Nk,Nl,Ng,Nm/))
 
   CALL init(VLEN, Nj, Nk, Nl, Ng, Nm, r, q, x, y, z, a, b, c, total)
 
