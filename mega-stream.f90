@@ -23,9 +23,19 @@
 
 PROGRAM megastream
 
+  USE iso_c_binding
   USE omp_lib
 
   IMPLICIT NONE
+
+  ! Use C for aligned allocation
+  INTERFACE
+    TYPE(C_PTR) FUNCTION ALLOC(len) BIND(C)
+      IMPORT :: C_PTR
+      IMPLICIT NONE
+      INTEGER, INTENT(IN) :: len
+    END FUNCTION
+  END INTERFACE
 
   ! Constant parameters
 
