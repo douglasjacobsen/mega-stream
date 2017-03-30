@@ -30,11 +30,19 @@ PROGRAM megastream
 
   ! Use C for aligned allocation
   INTERFACE
+
     TYPE(C_PTR) FUNCTION ALLOC(len) BIND(C)
       IMPORT :: C_PTR
       IMPLICIT NONE
-      INTEGER, INTENT(IN) :: len
+      INTEGER :: len
     END FUNCTION
+
+    SUBROUTINE ALLOC_FREE(cptr) BIND(C)
+      IMPORT :: C_PTR
+      IMPLICIT NONE
+      TYPE(C_PTR) :: cptr
+    END SUBROUTINE
+
   END INTERFACE
 
   ! Constant parameters
@@ -179,10 +187,15 @@ PROGRAM megastream
  WRITE(*, '(a,f11.6)') 'Total time: ', finish-start
 
 ! Deallocate memory
-  DEALLOCATE(q, r)
-  DEALLOCATE(a, b, c)
-  DEALLOCATE(x, y, z)
-  DEALLOCATE(total)
+  CALL ALLOC_FREE(q_pt)
+  CALL ALLOC_FREE(r_pt)
+  CALL ALLOC_FREE(x_pt)
+  CALL ALLOC_FREE(y_pt)
+  CALL ALLOC_FREE(z_pt)
+  CALL ALLOC_FREE(a_pt)
+  CALL ALLOC_FREE(b_pt)
+  CALL ALLOC_FREE(c_pt)
+  CALL ALLOC_FREE(total_pt)
   DEALLOCATE(timings)
 
 END PROGRAM megastream
