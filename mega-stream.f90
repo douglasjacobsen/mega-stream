@@ -145,7 +145,7 @@ PROGRAM megastream
   CALL C_F_POINTER(a_pt, a, (/VLEN,Ng/))
   CALL C_F_POINTER(b_pt, b, (/VLEN,Ng/))
   CALL C_F_POINTER(c_pt, c, (/VLEN,Ng/))
-  CALL C_F_POINTER(total_pt, total, (/Nj,Nk,Nl,Ng,Nm/))
+  CALL C_F_POINTER(total_pt, total, (/Nj,Nk,Nl,Nm/))
 
   CALL init(VLEN, Nj, Nk, Nl, Ng, Nm, r, q, x, y, z, a, b, c, total)
 
