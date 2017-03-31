@@ -23,9 +23,27 @@
 
 PROGRAM megastream
 
+  USE iso_c_binding
   USE omp_lib
 
   IMPLICIT NONE
+
+  ! Use C for aligned allocation
+  INTERFACE
+
+    TYPE(C_PTR) FUNCTION ALLOC(len) BIND(C)
+      IMPORT :: C_PTR
+      IMPLICIT NONE
+      INTEGER :: len
+    END FUNCTION
+
+    SUBROUTINE ALLOC_FREE(cptr) BIND(C)
+      IMPORT :: C_PTR
+      IMPLICIT NONE
+      TYPE(C_PTR) :: cptr
+    END SUBROUTINE
+
+  END INTERFACE
 
   ! Constant parameters
 
@@ -59,9 +77,13 @@ PROGRAM megastream
 
   ! Arrays
   REAL(8), DIMENSION(:,:,:,:,:,:), POINTER :: q, r, ptr_tmp
+  TYPE(C_PTR) :: q_pt, r_pt
   REAL(8), DIMENSION(:,:,:,:,:), ALLOCATABLE :: x, y, z
+  TYPE(C_PTR) :: x_pt, y_pt, z_pt
   REAL(8), DIMENSION(:,:), ALLOCATABLE :: a, b, c
+  TYPE(C_PTR) :: a_pt, b_pt, c_pt
   REAL(8), DIMENSION(:,:,:,:), ALLOCATABLE :: total
+  TYPE(C_PTR) :: total_pt
 
   REAL(8), DIMENSION(:), ALLOCATABLE :: timings
   REAL(8) :: tick, tock
@@ -105,16 +127,25 @@ PROGRAM megastream
   WRITE(*, '(a,I,a,I)') 'Inner dimension split into ', Ng, ' chunks of size ', VLEN
 
   ! Allocate memory
-  NULLIFY(q, r)
-  ALLOCATE(q(VLEN,Nj,Nk,Nl,Ng,Nm))
-  ALLOCATE(r(VLEN,Nj,Nk,Nl,Ng,Nm))
-  ALLOCATE(x(VLEN,Nj,Nk,Ng,Nm))
-  ALLOCATE(y(VLEN,Nj,Nl,Ng,Nm))
-  ALLOCATE(z(VLEN,Nk,Nl,Ng,Nm))
-  ALLOCATE(a(VLEN,Ng))
-  ALLOCATE(b(VLEN,Ng))
-  ALLOCATE(c(VLEN,Ng))
-  ALLOCATE(total(Nj,Nk,Nl,Nm))
+  q_pt = ALLOC(VLEN*Nj*Nk*Nl*Ng*Nm)
+  r_pt = ALLOC(VLEN*Nj*Nk*Nl*Ng*Nm)
+  x_pt = ALLOC(VLEN*Nj*Nk*Ng*Nm)
+  y_pt = ALLOC(VLEN*Nj*Nl*Ng*Nm)
+  z_pt = ALLOC(VLEN*Nk*Nl*Ng*Nm)
+  a_pt = ALLOC(VLEN*Ng)
+  b_pt = ALLOC(VLEN*Ng)
+  c_pt = ALLOC(VLEN*Ng)
+  total_pt = ALLOC(Nj*Nk*Nl*Nm)
+
+  CALL C_F_POINTER(q_pt, q, (/VLEN,Nj,Nk,Nl,Ng,Nm/))
+  CALL C_F_POINTER(r_pt, r, (/VLEN,Nj,Nk,Nl,Ng,Nm/))
+  CALL C_F_POINTER(x_pt, x, (/VLEN,Nj,Nk,Ng,Nm/))
+  CALL C_F_POINTER(y_pt, y, (/VLEN,Nj,Nl,Ng,Nm/))
+  CALL C_F_POINTER(z_pt, z, (/VLEN,Nk,Nl,Ng,Nm/))
+  CALL C_F_POINTER(a_pt, a, (/VLEN,Ng/))
+  CALL C_F_POINTER(b_pt, b, (/VLEN,Ng/))
+  CALL C_F_POINTER(c_pt, c, (/VLEN,Ng/))
+  CALL C_F_POINTER(total_pt, total, (/Nj,Nk,Nl,Nm/))
 
   CALL init(VLEN, Nj, Nk, Nl, Ng, Nm, r, q, x, y, z, a, b, c, total)
 
@@ -156,10 +187,15 @@ PROGRAM megastream
  WRITE(*, '(a,f11.6)') 'Total time: ', finish-start
 
 ! Deallocate memory
-  DEALLOCATE(q, r)
-  DEALLOCATE(a, b, c)
-  DEALLOCATE(x, y, z)
-  DEALLOCATE(total)
+  CALL ALLOC_FREE(q_pt)
+  CALL ALLOC_FREE(r_pt)
+  CALL ALLOC_FREE(x_pt)
+  CALL ALLOC_FREE(y_pt)
+  CALL ALLOC_FREE(z_pt)
+  CALL ALLOC_FREE(a_pt)
+  CALL ALLOC_FREE(b_pt)
+  CALL ALLOC_FREE(c_pt)
+  CALL ALLOC_FREE(total_pt)
   DEALLOCATE(timings)
 
 END PROGRAM megastream

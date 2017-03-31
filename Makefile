@@ -34,8 +34,11 @@ mega-stream: mega-stream.c
 mega-stream-omp4: mega-stream-omp4.c
 	cc -hstd=c99 -O3 $^ -o $@
 
-mega-stream-ftn: mega-stream.f90
-	$(FTN) $(FFLAGS) $(OPTIONS) -align array64byte $(OMP) $^ -o $@
+mega-stream-ftn: mega-stream.f90 alloc.o
+	$(FTN) $(FFLAGS) $(OPTIONS) $(OMP) $^ -o $@
+
+alloc.o: alloc.c
+	$(CC) $(CFLAGS) $(OPTIONS) alloc.c -c
 
 .PHONY: clean
 
