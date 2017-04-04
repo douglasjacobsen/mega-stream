@@ -87,15 +87,15 @@ void* aligned_alloc(size_t alignment, size_t size)
 void kernel(
   const int Ng,
   const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
-  double (* restrict r)[Ng][Nl][Nk][Nj][VLEN],
-  const double (* restrict q)[Ng][Nl][Nk][Nj][VLEN],
-  double (* restrict x)[Ng][Nk][Nj][VLEN],
-  double (* restrict y)[Ng][Nl][Nj][VLEN],
-  double (* restrict z)[Ng][Nl][Nk][VLEN],
-  const double (* restrict a)[VLEN],
-  const double (* restrict b)[VLEN],
-  const double (* restrict c)[VLEN],
-  double (* restrict sum)[Nl][Nk][Nj]
+  double * restrict r,
+  const double * restrict q,
+  double * restrict x,
+  double * restrict y,
+  double * restrict z,
+  const double * restrict a,
+  const double * restrict b,
+  const double * restrict c,
+  double * restrict sum
 );
 void parse_args(int argc, char *argv[]);
 
@@ -266,15 +266,7 @@ int main(int argc, char *argv[])
     double tick = omp_get_wtime();
 
     kernel(Ng,Ni,Nj,Nk,Nl,Nm,
-        (double(*)[Ng][Nl][Nk][Nj][VLEN]) r,
-        (const double(*)[Ng][Nl][Nk][Nj][VLEN]) q,
-        (double(*)[Ng][Nk][Nj][VLEN]) x,
-        (double(*)[Ng][Nl][Nj][VLEN]) y,
-        (double(*)[Ng][Nl][Nk][VLEN]) z,
-        (const double(*)[VLEN]) a,
-        (const double(*)[VLEN]) b,
-        (const double(*)[VLEN]) c,
-        (double(*)[Nl][Nk][Nj]) sum);
+           r,q,x,y,z,a,b,c,sum);
 
     /* Swap the pointers */
     double *tmp = q; q = r; r = tmp;
@@ -326,19 +318,18 @@ int main(int argc, char *argv[])
 /**************************************************************************
  * Kernel
  *************************************************************************/
-#include <immintrin.h>
 void kernel(
   const int Ng,
   const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
-  double (* restrict r)[Ng][Nl][Nk][Nj][VLEN],
-  const double (* restrict q)[Ng][Nl][Nk][Nj][VLEN],
-  double (* restrict x)[Ng][Nk][Nj][VLEN],
-  double (* restrict y)[Ng][Nl][Nj][VLEN],
-  double (* restrict z)[Ng][Nl][Nk][VLEN],
-  const double (* restrict a)[VLEN],
-  const double (* restrict b)[VLEN],
-  const double (* restrict c)[VLEN],
-  double (* restrict sum)[Nl][Nk][Nj]
+  double * restrict r,
+  const double * restrict q,
+  double * restrict x,
+  double * restrict y,
+  double * restrict z,
+  const double * restrict a,
+  const double * restrict b,
+  const double * restrict c,
+  double * restrict sum
   )
 {
   #pragma omp parallel for
@@ -348,28 +339,27 @@ void kernel(
         for (int k = 0; k < Nk; k++) {
           for (int j = 0; j < Nj; j++) {
             double total = 0.0;
-            _mm_prefetch((const char*) (&q[m][g][l][k][j][0] + 32*VLEN), _MM_HINT_T1);
             #pragma vector nontemporal(r)
             #pragma omp simd reduction(+:total) aligned(a,b,c,x,y,z,r,q:64)
             for (int v = 0; v < VLEN; v++) {
               /* Set r */
-              r[m][g][l][k][j][v] =
-                q[m][g][l][k][j][v] +
-                a[g][v] * x[m][g][k][j][v] +
-                b[g][v] * y[m][g][l][j][v] +
-                c[g][v] * z[m][g][l][k][v];
+              r[IDX6(v,j,k,l,g,m,VLEN,Nj,Nk,Nl,Ng)] =
+                q[IDX6(v,j,k,l,g,m,VLEN,Nj,Nk,Nl,Ng)] +
+                a[IDX2(v,g,VLEN)] * x[IDX5(v,j,k,g,m,VLEN,Nj,Nk,Ng)] +
+                b[IDX2(v,g,VLEN)] * y[IDX5(v,j,l,g,m,VLEN,Nj,Nl,Ng)] +
+                c[IDX2(v,g,VLEN)] * z[IDX5(v,k,l,g,m,VLEN,Nk,Nl,Ng)];
 
               /* Update x, y and z */
-              x[m][g][k][j][v] = 0.2*r[m][g][l][k][j][v] - x[m][g][k][j][v];
-              y[m][g][l][j][v] = 0.2*r[m][g][l][k][j][v] - y[m][g][l][j][v];
-              z[m][g][l][k][v] = 0.2*r[m][g][l][k][j][v] - z[m][g][l][k][v];
+              x[IDX5(v,j,k,g,m,VLEN,Nj,Nk,Ng)] = 0.2*r[IDX6(v,j,k,l,g,m,VLEN,Nj,Nk,Nl,Ng)] - x[IDX5(v,j,k,g,m,VLEN,Nj,Nk,Ng)];
+              y[IDX5(v,j,l,g,m,VLEN,Nj,Nl,Ng)] = 0.2*r[IDX6(v,j,k,l,g,m,VLEN,Nj,Nk,Nl,Ng)] - y[IDX5(v,j,l,g,m,VLEN,Nj,Nl,Ng)];
+              z[IDX5(v,k,l,g,m,VLEN,Nk,Nl,Ng)] = 0.2*r[IDX6(v,j,k,l,g,m,VLEN,Nj,Nk,Nl,Ng)] - z[IDX5(v,k,l,g,m,VLEN,Nk,Nl,Ng)];
 
               /* Reduce over Ni */
-              total += r[m][g][l][k][j][v];
+              total += r[IDX6(v,j,k,l,g,m,VLEN,Nj,Nk,Nl,Ng)];
 
             } /* VLEN */
 
-            sum[m][l][k][j] += total;
+            sum[IDX4(j,k,l,m,Nj,Nk,Nl)] += total;
 
           } /* Nj */
         } /* Nk */
