@@ -227,6 +227,7 @@ SUBROUTINE kernel(VLEN, Nj, Nk, Nl, Ng, Nm, r, q, x, y, z, a, b, c, total)
         DO k = 1, Nk
           DO j = 1, Nj
             tmp_total = 0.0_8
+            CALL MM_PREFETCH(q(1+32*VLEN,j,k,l,g,m), 1)
             !DIR$ VECTOR NONTEMPORAL(r)
             !$OMP SIMD REDUCTION(+:tmp_total) ALIGNED(a,b,c,x,y,z,r,q:64)
             DO v = 1, VLEN
