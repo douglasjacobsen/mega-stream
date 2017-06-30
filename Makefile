@@ -19,7 +19,7 @@
 
 
 CC = icc
-CFLAGS = -std=c11 -O3
+CFLAGS = -std=c11 -O3 -xMIC-AVX512
 
 FTN = ifort
 FFLAGS = -O3
