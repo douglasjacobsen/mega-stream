@@ -41,6 +41,7 @@
 #define IDX4(i,j,k,l,ni,nj,nk) ((i)+(ni)*IDX3((j),(k),(l),(nj),(nk)))
 #define IDX5(i,j,k,l,m,ni,nj,nk,nl) ((i)+(ni)*IDX4((j),(k),(l),(m),(nj),(nk),(nl)))
 #define IDX6(i,j,k,l,m,n,ni,nj,nk,nl,nm) ((i)+(ni)*IDX5((j),(k),(l),(m),(n),(nj),(nk),(nl),(nm)))
+#define IDX7(i,j,k,l,m,n,o,ni,nj,nk,nl,nm,nn) ((i)+(ni)*IDX6((j),(k),(l),(m),(n),(o),(nj),(nk),(nl),(nm),(nn)))
 
 /*
   Arrays are defined in terms of 3 sizes: inner, middle and outer.
@@ -86,9 +87,9 @@ void* aligned_alloc(size_t alignment, size_t size)
 
 void kernel(
   const int Ng,
-  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
-  double (* restrict r)[Ng][Nl][Nk][Nj][VLEN],
-  const double (* restrict q)[Ng][Nl][Nk][Nj][VLEN],
+  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm, const int Nn,
+  double (* restrict r)[Nm][Ng][Nl][Nk][Nj][VLEN],
+  const double (* restrict q)[Nm][Ng][Nl][Nk][Nj][VLEN],
   double (* restrict x)[Ng][Nk][Nj][VLEN],
   double (* restrict y)[Ng][Nl][Nj][VLEN],
   double (* restrict z)[Ng][Nl][Nk][VLEN],
@@ -105,6 +106,7 @@ int Nj = MIDDLE;
 int Nk = MIDDLE;
 int Nl = MIDDLE;
 int Nm = OUTER;
+int Nn = 8;
 int Ng;
 
 /* Number of iterations to run benchmark */
@@ -123,11 +125,11 @@ int main(int argc, char *argv[])
   printf("Medium arrays: %d x %d x %d x %d elements\t(%.1lf MB)\n",
     Ni, Nj, Nj, Nm, Ni*Nj*Nj*Nm*sizeof(double)*1.0E-6);
 
-  printf("Large arrays:  %d x %d x %d x %d x %d elements\t(%.1lf MB)\n",
-    Ni, Nj, Nj, Nj, Nm, Ni*Nj*Nj*Nj*Nm*sizeof(double)*1.0E-6);
+  printf("Large arrays:  %d x %d x %d x %d x %d x %d elements\t(%.1lf MB)\n",
+    Ni, Nj, Nj, Nj, Nm, Nn, Ni*Nj*Nj*Nj*Nm*Nn*sizeof(double)*1.0E-6);
 
   const double footprint = (double)sizeof(double) * 1.0E-6 * (
-    2.0*Ni*Nj*Nk*Nl*Nm +  /* r, q */
+    2.0*Ni*Nj*Nk*Nl*Nm*Nn +  /* r, q */
     Ni*Nj*Nk*Nm +         /* x */
     Ni*Nj*Nl*Nm +         /* y */
     Ni*Nk*Nl*Nm +         /* z */
@@ -137,7 +139,7 @@ int main(int argc, char *argv[])
   printf("Memory footprint: %.1lf MB\n", footprint);
 
   /* Total memory moved (in the best case) - the arrays plus an extra sum as update is += */
-  const double moved = (double)sizeof(double) * 1.0E-6 * (
+  const double moved = (double)sizeof(double) * 1.0E-6 * Nn * (
     Ni*Nj*Nk*Nl*Nm  + /* read q */
     Ni*Nj*Nk*Nl*Nm  + /* write r */
     Ni + Ni + Ni    + /* read a, b and c */
@@ -157,8 +159,8 @@ int main(int argc, char *argv[])
 
   double timings[ntimes];
 
-  double *q = aligned_alloc(ALIGNMENT, sizeof(double)*VLEN*Nj*Nk*Nl*Nm*Ng);
-  double *r = aligned_alloc(ALIGNMENT, sizeof(double)*VLEN*Nj*Nk*Nl*Nm*Ng);
+  double *q = aligned_alloc(ALIGNMENT, sizeof(double)*VLEN*Nj*Nk*Nl*Nm*Ng*Nn);
+  double *r = aligned_alloc(ALIGNMENT, sizeof(double)*VLEN*Nj*Nk*Nl*Nm*Ng*Nn);
 
   double *x = aligned_alloc(ALIGNMENT, sizeof(double)*VLEN*Nj*Nk*Nm*Ng);
   double *y = aligned_alloc(ALIGNMENT, sizeof(double)*VLEN*Nj*Nl*Nm*Ng);
@@ -174,16 +176,18 @@ int main(int argc, char *argv[])
   #pragma omp parallel
   {
     /* q and r */
-    #pragma omp for
-    for (int m = 0; m < Nm; m++) {
-      for (int g = 0; g < Ng; g++) {
-        for (int l = 0; l < Nl; l++) {
-          for (int k = 0; k < Nk; k++) {
-            for (int j = 0; j < Nj; j++) {
-              #pragma omp simd
-              for (int v = 0; v < VLEN; v++) {
-                q[IDX6(v,j,k,l,g,m,VLEN,Nj,Nk,Nl,Ng)] = Q_START;
-                r[IDX6(v,j,k,l,g,m,VLEN,Nj,Nk,Nl,Ng)] = R_START;
+    for (int n = 0; n < Nn; n++) {
+      #pragma omp for
+      for (int m = 0; m < Nm; m++) {
+        for (int g = 0; g < Ng; g++) {
+          for (int l = 0; l < Nl; l++) {
+            for (int k = 0; k < Nk; k++) {
+              for (int j = 0; j < Nj; j++) {
+                #pragma omp simd
+                for (int v = 0; v < VLEN; v++) {
+                  q[IDX7(v,j,k,l,g,m,n,VLEN,Nj,Nk,Nl,Ng,Nm)] = Q_START;
+                  r[IDX7(v,j,k,l,g,m,n,VLEN,Nj,Nk,Nl,Ng,Nm)] = R_START;
+                }
               }
             }
           }
@@ -265,9 +269,9 @@ int main(int argc, char *argv[])
   for (int t = 0; t < ntimes; t++) {
     double tick = omp_get_wtime();
 
-    kernel(Ng,Ni,Nj,Nk,Nl,Nm,
-        (double(*)[Ng][Nl][Nk][Nj][VLEN]) r,
-        (const double(*)[Ng][Nl][Nk][Nj][VLEN]) q,
+    kernel(Ng,Ni,Nj,Nk,Nl,Nm,Nn,
+        (double(*)[Nm][Ng][Nl][Nk][Nj][VLEN]) r,
+        (const double(*)[Nm][Ng][Nl][Nk][Nj][VLEN]) q,
         (double(*)[Ng][Nk][Nj][VLEN]) x,
         (double(*)[Ng][Nl][Nj][VLEN]) y,
         (double(*)[Ng][Nl][Nk][VLEN]) z,
@@ -328,9 +332,9 @@ int main(int argc, char *argv[])
  *************************************************************************/
 void kernel(
   const int Ng,
-  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
-  double (* restrict r)[Ng][Nl][Nk][Nj][VLEN],
-  const double (* restrict q)[Ng][Nl][Nk][Nj][VLEN],
+  const int Ni, const int Nj, const int Nk, const int Nl, const int Nm, const int Nn,
+  double (* restrict r)[Nm][Ng][Nl][Nk][Nj][VLEN],
+  const double (* restrict q)[Nm][Ng][Nl][Nk][Nj][VLEN],
   double (* restrict x)[Ng][Nk][Nj][VLEN],
   double (* restrict y)[Ng][Nl][Nj][VLEN],
   double (* restrict z)[Ng][Nl][Nk][VLEN],
@@ -340,40 +344,42 @@ void kernel(
   double (* restrict sum)[Nl][Nk][Nj]
   )
 {
-  #pragma omp parallel for
-  for (int m = 0; m < Nm; m++) {
-    for (int g = 0; g < Ng; g++) {
-      for (int l = 0; l < Nl; l++) {
-        for (int k = 0; k < Nk; k++) {
-          for (int j = 0; j < Nj; j++) {
-            double total = 0.0;
-            #pragma vector nontemporal(r)
-            #pragma omp simd reduction(+:total) aligned(a,b,c,x,y,z,r,q:64)
-            for (int v = 0; v < VLEN; v++) {
-              /* Set r */
-              r[m][g][l][k][j][v] =
-                q[m][g][l][k][j][v] +
-                a[g][v] * x[m][g][k][j][v] +
-                b[g][v] * y[m][g][l][j][v] +
-                c[g][v] * z[m][g][l][k][v];
+  for (int n = 0; n < Nn; n++) {
+    #pragma omp parallel for
+    for (int m = 0; m < Nm; m++) {
+      for (int g = 0; g < Ng; g++) {
+        for (int l = 0; l < Nl; l++) {
+          for (int k = 0; k < Nk; k++) {
+            for (int j = 0; j < Nj; j++) {
+              double total = 0.0;
+              #pragma vector nontemporal(r)
+              #pragma omp simd reduction(+:total) aligned(a,b,c,x,y,z,r,q:64)
+              for (int v = 0; v < VLEN; v++) {
+                /* Set r */
+                r[n][m][g][l][k][j][v] =
+                  q[n][m][g][l][k][j][v] +
+                  a[g][v] * x[m][g][k][j][v] +
+                  b[g][v] * y[m][g][l][j][v] +
+                  c[g][v] * z[m][g][l][k][v];
 
-              /* Update x, y and z */
-              x[m][g][k][j][v] = 0.2*r[m][g][l][k][j][v] - x[m][g][k][j][v];
-              y[m][g][l][j][v] = 0.2*r[m][g][l][k][j][v] - y[m][g][l][j][v];
-              z[m][g][l][k][v] = 0.2*r[m][g][l][k][j][v] - z[m][g][l][k][v];
+                /* Update x, y and z */
+                x[m][g][k][j][v] = 0.2*r[n][m][g][l][k][j][v] - x[m][g][k][j][v];
+                y[m][g][l][j][v] = 0.2*r[n][m][g][l][k][j][v] - y[m][g][l][j][v];
+                z[m][g][l][k][v] = 0.2*r[n][m][g][l][k][j][v] - z[m][g][l][k][v];
 
-              /* Reduce over Ni */
-              total += r[m][g][l][k][j][v];
+                /* Reduce over Ni */
+                total += r[n][m][g][l][k][j][v];
 
-            } /* VLEN */
+              } /* VLEN */
 
-            sum[m][l][k][j] += total;
+              sum[m][l][k][j] += total;
 
-          } /* Nj */
-        } /* Nk */
-      } /* Nl */
-    } /* Ng */
-  } /* Nm */
+            } /* Nj */
+          } /* Nk */
+        } /* Nl */
+      } /* Ng */
+    } /* Nm */
+  } /* Nn */
 }
 
 void parse_args(int argc, char *argv[])
