@@ -353,6 +353,7 @@ void kernel(
             for (int j = 0; j < Nj; j++) {
               double total = 0.0;
               #pragma vector nontemporal(r)
+              #pragma vector aligned
               #pragma omp simd reduction(+:total) aligned(a,b,c,x,y,z,r,q:64)
               for (int v = 0; v < VLEN; v++) {
                 /* Set r */
