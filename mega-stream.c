@@ -326,7 +326,6 @@ int main(int argc, char *argv[])
 /**************************************************************************
  * Kernel
  *************************************************************************/
-#include <immintrin.h>
 void kernel(
   const int Ng,
   const int Ni, const int Nj, const int Nk, const int Nl, const int Nm,
@@ -348,7 +347,6 @@ void kernel(
         for (int k = 0; k < Nk; k++) {
           for (int j = 0; j < Nj; j++) {
             double total = 0.0;
-            _mm_prefetch((const char*) (&q[m][g][l][k][j][0] + 32*VLEN), _MM_HINT_T1);
             #pragma vector nontemporal(r)
             #pragma omp simd reduction(+:total) aligned(a,b,c,x,y,z,r,q:64)
             for (int v = 0; v < VLEN; v++) {
