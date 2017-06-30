@@ -162,6 +162,9 @@ PROGRAM megastream
     tock = omp_get_wtime()
     timings(t) = tock-tick
 
+    tock = omp_get_wtime()
+    timings(t) = tock-tick
+
     ! Swap the pointers
     ptr_tmp => q
     q => r
