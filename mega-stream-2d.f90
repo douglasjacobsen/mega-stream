@@ -70,6 +70,7 @@ PROGRAM megastream
   INTEGER :: Nk = MIDDLE
   INTEGER :: Nm = OUTER
   INTEGER :: Ng
+  INTEGER :: chunk = 1
 
   ! Number of iterations to run benchmark
   INTEGER :: ntimes = 100
@@ -96,7 +97,7 @@ PROGRAM megastream
   WRITE(*, '(a)') 'MEGA-STREAM! - v0.3'
   WRITE(*, *)
 
-  CALL parse_args(Ni, Nj, Nk, Nm, ntimes)
+  CALL parse_args(Ni, Nj, Nk, Nm, ntimes, chunk)
 
   WRITE(*, '(a,I,a,f8.1,a)') 'Small arrays: ', Ni, ' elements ', Ni*8*1.0E-3, 'KB'
   WRITE(*, '(a,I4,a,I4,a,I4,a,I4,f8.1,a)') 'Large arrays: ', Ni, ' x', Nj, &
@@ -343,11 +344,11 @@ SUBROUTINE init(VLEN, Nj, Nk, Ng, Nm, r, q, x, y, a, b, total)
 !$OMP END PARALLEL
 END SUBROUTINE
 
-SUBROUTINE parse_args(Ni, Nj, Nk, Nm, ntimes)
+SUBROUTINE parse_args(Ni, Nj, Nk, Nm, ntimes, chunk)
 
   IMPLICIT NONE
 
-  INTEGER, INTENT(INOUT) :: Ni, Nj, Nk, Nm, ntimes
+  INTEGER, INTENT(INOUT) :: Ni, Nj, Nk, Nm, ntimes, chunk
 
   CHARACTER(len=32) :: arg
 
@@ -371,6 +372,10 @@ SUBROUTINE parse_args(Ni, Nj, Nk, Nm, ntimes)
       i = i + 1
       CALL getarg(i, arg)
       READ(arg, *) Nj
+    ELSE IF (arg .EQ. "--chunk") THEN
+      i = i + 1
+      CALL getarg(i, arg)
+      READ(arg, *) chunk
     ELSE IF (arg .EQ. "--ntimes") THEN
       i = i + 1
       CALL getarg(i, arg)
@@ -385,6 +390,7 @@ SUBROUTINE parse_args(Ni, Nj, Nk, Nm, ntimes)
       WRITE(*, *) "--inner  n  Set size of inner dimension"
       WRITE(*, *) "--Nj     n  Set size of the j dimension"
       WRITE(*, *) "--Nk     n  Set size of the k dimension"
+      WRITE(*, *) "--chunk  n  Set size of chunk in k dimension"
       WRITE(*, *) "--ntimes n  Run the benchmark n times"
       WRITE(*, *)
       STOP
