@@ -70,7 +70,7 @@ PROGRAM megastream
   INTEGER :: Nk = MIDDLE
   INTEGER :: Nm = OUTER
   INTEGER :: Ng
-  INTEGER :: chunk = 1
+  INTEGER :: chunk = MIDDLE
 
   ! Number of iterations to run benchmark
   INTEGER :: ntimes = 100
@@ -129,7 +129,7 @@ PROGRAM megastream
   q_pt = ALLOC(VLEN*Nj*Nk*Ng*Nm)
   r_pt = ALLOC(VLEN*Nj*Nk*Ng*Nm)
   x_pt = ALLOC(VLEN*Nj*Ng*Nm)
-  y_pt = ALLOC(VLEN*Nk*Ng*Nm)
+  y_pt = ALLOC(VLEN*chunk*Ng*Nm)
   a_pt = ALLOC(VLEN*Ng)
   b_pt = ALLOC(VLEN*Ng)
   total_pt = ALLOC(Nj*Nk*Nm)
@@ -137,12 +137,12 @@ PROGRAM megastream
   CALL C_F_POINTER(q_pt, q, (/VLEN,Nj,Nk,Ng,Nm/))
   CALL C_F_POINTER(r_pt, r, (/VLEN,Nj,Nk,Ng,Nm/))
   CALL C_F_POINTER(x_pt, x, (/VLEN,Nj,Ng,Nm/))
-  CALL C_F_POINTER(y_pt, y, (/VLEN,Nk,Ng,Nm/))
+  CALL C_F_POINTER(y_pt, y, (/VLEN,chunk,Ng,Nm/))
   CALL C_F_POINTER(a_pt, a, (/VLEN,Ng/))
   CALL C_F_POINTER(b_pt, b, (/VLEN,Ng/))
   CALL C_F_POINTER(total_pt, total, (/Nj,Nk,Nm/))
 
-  CALL init(VLEN, Nj, Nk, Ng, Nm, r, q, x, y, a, b, total)
+  CALL init(VLEN, Nj, Nk, Ng, Nm, chunk, r, q, x, y, a, b, total)
 
   ALLOCATE(timings(ntimes))
 
@@ -152,7 +152,7 @@ PROGRAM megastream
   DO t = 1, ntimes
     tick = omp_get_wtime()
 
-    CALL kernel(VLEN, Nj, Nk, Ng, Nm, r, q, x, y, a, b, total)
+    CALL kernel(VLEN, Nj, Nk, Ng, Nm, chunk, r, q, x, y, a, b, total)
 
     tock = omp_get_wtime()
     timings(t) = tock-tick
@@ -199,56 +199,58 @@ END PROGRAM megastream
 !**************************************************************************
 !* Kernel
 !*************************************************************************/
-SUBROUTINE kernel(VLEN, Nj, Nk, Ng, Nm, r, q, x, y, a, b, total)
+SUBROUTINE kernel(VLEN, Nj, Nk, Ng, Nm, chunk, r, q, x, y, a, b, total)
 
   IMPLICIT NONE
   
-  INTEGER, INTENT(IN) :: VLEN, Nj, Nk, Ng, Nm
+  INTEGER, INTENT(IN) :: VLEN, Nj, Nk, Ng, Nm, chunk
 
   REAL(8), DIMENSION(VLEN, Nj, Nk, Ng, Nm), INTENT(INOUT) :: q, r
   REAL(8), DIMENSION(VLEN, Nj, Ng, Nm), INTENT(INOUT) :: x
-  REAL(8), DIMENSION(VLEN, Nk, Ng, Nm), INTENT(INOUT) :: y
+  REAL(8), DIMENSION(VLEN, chunk, Ng, Nm), INTENT(INOUT) :: y
   REAL(8), DIMENSION(VLEN, Ng), INTENT(IN) :: a, b
   REAL(8), DIMENSION(Nj, Nk, Nm), INTENT(INOUT) :: total
 
   ! Local variables
-  INTEGER :: v, j, k, g, m
+  INTEGER :: v, j, k, g, m, c
   REAL(8) :: tmp_r, tmp_total
 
+  DO c = 1, Nk, chunk
 !$OMP PARALLEL DO PRIVATE(tmp_r, tmp_total)
-  DO m = 1, Nm
-    DO g = 1, Ng
-      DO k = 1, Nk
-        DO j = 1, Nj
-          tmp_total = 0.0_8
-          CALL MM_PREFETCH(q(1+32*VLEN,j,k,g,m), 1)
-          !DIR$ VECTOR NONTEMPORAL(r)
-          !$OMP SIMD REDUCTION(+:tmp_total) ALIGNED(a,b,x,y,r,q:64)
-          DO v = 1, VLEN
-            ! Set r
-            tmp_r = q(v,j,k,g,m) +  &
-              a(v,g)*x(v,j,g,m) +     &
-              b(v,g)*y(v,k,g,m)
-
-            ! Update x, y and z
-            x(v,j,g,m) = 0.2_8*tmp_r - x(v,j,g,m)
-            y(v,k,g,m) = 0.2_8*tmp_r - y(v,k,g,m)
-
-            ! Reduce over Ni
-            tmp_total = tmp_total + tmp_r
-
-            ! Save r
-            r(v,j,k,g,m) = tmp_r
-
-          END DO ! i
-
-          total(j,k,m) = total(j,k,m) + tmp_total
-
-        END DO ! j
-      END DO ! k
-    END DO ! g
-  END DO ! m
-!$OMP END PARALLEL DO
+    DO m = 1, Nm
+      DO g = 1, Ng
+        DO k = c, c+chunk-1
+          DO j = 1, Nj
+            tmp_total = 0.0_8
+            CALL MM_PREFETCH(q(1+32*VLEN,j,k,g,m), 1)
+            !DIR$ VECTOR NONTEMPORAL(r)
+            !$OMP SIMD REDUCTION(+:tmp_total) ALIGNED(a,b,x,y,r,q:64)
+            DO v = 1, VLEN
+              ! Set r
+              tmp_r = q(v,j,k,g,m) +  &
+                a(v,g)*x(v,j,g,m) +     &
+                b(v,g)*y(v,k-c,g,m)
+  
+              ! Update x, y and z
+              x(v,j,g,m) = 0.2_8*tmp_r - x(v,j,g,m)
+              y(v,k-c+1,g,m) = 0.2_8*tmp_r - y(v,k-c+1,g,m)
+  
+              ! Reduce over Ni
+              tmp_total = tmp_total + tmp_r
+  
+              ! Save r
+              r(v,j,k,g,m) = tmp_r
+  
+            END DO ! i
+  
+            total(j,k,m) = total(j,k,m) + tmp_total*0.01_8
+  
+          END DO ! j
+        END DO ! k
+      END DO ! g
+    END DO ! m
+  !$OMP END PARALLEL DO
+  END DO ! c
 
 END SUBROUTINE kernel
 !**************************************************************************
@@ -256,14 +258,14 @@ END SUBROUTINE kernel
 !*************************************************************************/
 
 ! Initilise the arrays
-SUBROUTINE init(VLEN, Nj, Nk, Ng, Nm, r, q, x, y, a, b, total)
+SUBROUTINE init(VLEN, Nj, Nk, Ng, Nm, chunk, r, q, x, y, a, b, total)
 
   IMPLICIT NONE
 
-  INTEGER, INTENT(IN) :: VLEN, Nj, Nk, Ng, Nm
+  INTEGER, INTENT(IN) :: VLEN, Nj, Nk, Ng, Nm, chunk
   REAL(8), DIMENSION(VLEN, Nj, Nk, Ng, Nm), INTENT(INOUT) :: q, r
   REAL(8), DIMENSION(VLEN, Nj, Ng, Nm), INTENT(INOUT) :: x
-  REAL(8), DIMENSION(VLEN, Nk, Ng, Nm), INTENT(INOUT) :: y
+  REAL(8), DIMENSION(VLEN, chunk, Ng, Nm), INTENT(INOUT) :: y
   REAL(8), DIMENSION(VLEN, Ng), INTENT(INOUT) :: a, b
   REAL(8), DIMENSION(Nj, Nk, Nm), INTENT(INOUT) :: total
 
@@ -311,7 +313,7 @@ SUBROUTINE init(VLEN, Nj, Nk, Ng, Nm, r, q, x, y, a, b, total)
 !$OMP DO
   DO m = 1, Nm
     DO g = 1, Ng
-      DO k = 1, Nk
+      DO k = 1, chunk
         DO v = 1, VLEN
           y(v,k,g,m) = Y_START
         END DO
