@@ -81,7 +81,7 @@ PROGRAM megastream
   TYPE(C_PTR) :: x_pt, y_pt
   REAL(8), DIMENSION(:,:), ALLOCATABLE :: a, b
   TYPE(C_PTR) :: a_pt, b_pt
-  REAL(8), DIMENSION(:,:,:,:), ALLOCATABLE :: total
+  REAL(8), DIMENSION(:,:,:), ALLOCATABLE :: total
   TYPE(C_PTR) :: total_pt
 
   REAL(8), DIMENSION(:), ALLOCATABLE :: timings
