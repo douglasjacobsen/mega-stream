@@ -363,10 +363,9 @@ SUBROUTINE parse_args(Ni, Nj, Nk, Nm, ntimes)
       i = i + 1
       CALL getarg(i, arg)
       READ(arg, *) Ni
-    ELSE IF (arg .EQ. "--middle") THEN
+    ELSE IF (arg .EQ. "--Nk") THEN
       i = i + 1
       CALL getarg(i, arg)
-      READ(arg, *) Nj
       READ(arg, *) Nk
     ELSE IF (arg .EQ. "--Nj") THEN
       i = i + 1
@@ -384,8 +383,8 @@ SUBROUTINE parse_args(Ni, Nj, Nk, Nm, ntimes)
     ELSE IF (arg .EQ. "--help") THEN
       WRITE(*, *) "--outer  n  Set size of outer dimension"
       WRITE(*, *) "--inner  n  Set size of inner dimension"
-      WRITE(*, *) "--middle n  Set size of middle dimension"
       WRITE(*, *) "--Nj     n  Set size of the j dimension"
+      WRITE(*, *) "--Nk     n  Set size of the k dimension"
       WRITE(*, *) "--ntimes n  Run the benchmark n times"
       WRITE(*, *)
       STOP
