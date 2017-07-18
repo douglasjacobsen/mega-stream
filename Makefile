@@ -37,6 +37,9 @@ mega-stream-omp4: mega-stream-omp4.c
 mega-stream-ftn: mega-stream.f90 alloc.o
 	$(FTN) $(FFLAGS) $(OPTIONS) $(OMP) $^ -o $@
 
+mega-stream-2d: mega-stream-2d.f90 alloc.o
+	$(FTN) $(FFLAGS) $(OPTIONS) $(OMP) $^ -o $@
+
 alloc.o: alloc.c
 	$(CC) $(CFLAGS) $(OPTIONS) alloc.c -c
 
