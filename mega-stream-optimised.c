@@ -23,7 +23,7 @@
 
 */
 
-#define VERSION "0.3"
+#define VERSION "0.3.1"
 
 #include <float.h>
 #include <omp.h>
