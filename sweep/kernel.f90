@@ -118,29 +118,29 @@ subroutine sweeper(rank,lrank,rrank,            &
 
       !$omp parallel do private(cj,j,i,a,psi)
       do g = 1, ng                 ! Loop over energy groups
-        do cj = ymin, ymax, jstep  ! Loop over cells in chunk (y-dimension)
-          ! Calculate y index with respect to ny
-          j = (c-1)*chunk + cj
-          do i = xmin, xmax, istep ! Loop over x-dimension
-!dir$ vector nontemporal(aflux1)
-            do as = 1, nang_sets   ! Loop over angle sets
-            do a = 1, ang_set      ! Loop over angles in set
-              ! Calculate angular flux
-              psi = (mu(a,as)*psii(a,cj,as,g) + eta(a,as)*psij(a,i,as,g) + v*aflux0(a,i,j,as,sweep,g)) &
-                    / (0.07_8 + 2.0_8*mu(a,as)/dx + 2.0_8*eta(a,as)/dy + v)
+        do as = 1, nang_sets   ! Loop over angle sets
+          do cj = ymin, ymax, jstep  ! Loop over cells in chunk (y-dimension)
+            ! Calculate y index with respect to ny
+            j = (c-1)*chunk + cj
+            do i = xmin, xmax, istep ! Loop over x-dimension
+!dir$   vector nontemporal(aflux1)
+              do a = 1, ang_set      ! Loop over angles in set
+                ! Calculate angular flux
+                psi = (mu(a,as)*psii(a,cj,as,g) + eta(a,as)*psij(a,i,as,g) + v*aflux0(a,i,j,as,sweep,g)) &
+                      / (0.07_8 + 2.0_8*mu(a,as)/dx + 2.0_8*eta(a,as)/dy + v)
 
-              ! Outgoing diamond difference
-              psii(a,cj,as,g) = 2.0_8*psi - psii(a,cj,as,g)
-              psij(a,i,as,g) = 2.0_8*psi - psij(a,i,as,g)
-              aflux1(a,i,j,as,sweep,g) = 2.0_8*psi - aflux0(a,i,j,as,sweep,g)
+                ! Outgoing diamond difference
+                psii(a,cj,as,g) = 2.0_8*psi - psii(a,cj,as,g)
+                psij(a,i,as,g) = 2.0_8*psi - psij(a,i,as,g)
+                aflux1(a,i,j,as,sweep,g) = 2.0_8*psi - aflux0(a,i,j,as,sweep,g)
   
-              ! Reduction
-              sflux(i,j,g) = sflux(i,j,g) + psi*w(a,as)
+                ! Reduction
+                sflux(i,j,g) = sflux(i,j,g) + psi*w(a,as)
 
-            end do ! angles in set loop
-            end do ! angle sets loop
-          end do ! x loop
-        end do ! y chunk loop
+              end do ! angles in set loop
+            end do ! x loop
+          end do ! y chunk loop
+        end do ! angle sets loop
       end do ! group loop
       !$omp end parallel do
 
