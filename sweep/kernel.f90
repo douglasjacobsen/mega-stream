@@ -23,7 +23,8 @@
 
 ! Sweep kernel
 subroutine sweeper(rank,lrank,rrank,            &
-                   nang,nx,ny,ng,nsweeps,chunk, &
+                   nang,ang_set,nang_sets,      &
+                   nx,ny,ng,nsweeps,chunk,      &
                    aflux0,aflux1,sflux,         &
                    psii,psij,                   &
                    mu,eta,                      &
@@ -35,20 +36,21 @@ subroutine sweeper(rank,lrank,rrank,            &
   implicit none
 
   integer :: rank, lrank, rrank
-  integer :: nang, nx, ny, ng, nsweeps, chunk
-  real(kind=8) :: aflux0(nang,nx,ny,nsweeps,ng)
-  real(kind=8) :: aflux1(nang,nx,ny,nsweeps,ng)
+  integer :: nang, ang_set, nang_sets ! ang_set is the size of an angle set, nang_sets is the number of such sets
+  integer :: nx, ny, ng, nsweeps, chunk
+  real(kind=8) :: aflux0(ang_set,nx,ny,nang_sets,nsweeps,ng)
+  real(kind=8) :: aflux1(ang_set,nx,ny,nang_sets,nsweeps,ng)
   real(kind=8) :: sflux(nx,ny,ng)
-  real(kind=8) :: psii(nang,chunk,ng)
-  real(kind=8) :: psij(nang,nx,ng)
-  real(kind=8) :: mu(nang)
-  real(kind=8) :: eta(nang)
-  real(kind=8) :: w(nang)
+  real(kind=8) :: psii(ang_set,chunk,nang_sets,ng)
+  real(kind=8) :: psij(ang_set,nx,nang_sets,ng)
+  real(kind=8) :: mu(ang_set,nang_sets)
+  real(kind=8) :: eta(ang_set,nang_sets)
+  real(kind=8) :: w(ang_set,nang_sets)
   real(kind=8) :: v
   real(kind=8) :: dx, dy
-  real(kind=8) :: buf(nang,chunk,ng)
+  real(kind=8) :: buf(ang_set,chunk,nang_sets,ng)
 
-  integer :: a, i, j, g, c, cj, sweep
+  integer :: a, as, i, j, g, c, cj, sweep
   integer :: istep, jstep ! Spatial step direction
   integer :: xmin, xmax   ! x-dimension loop bounds
   integer :: ymin, ymax   ! y-dimension (chunk) loop bounds
@@ -109,9 +111,9 @@ subroutine sweeper(rank,lrank,rrank,            &
       ! Recv y boundary data for chunk
       psii = 0.0_8
       if (istep .eq. 1) then
-        call recv(psii, nang*chunk*ng, lrank)
+        call recv(psii, ang_set*chunk*nang_sets*ng, lrank)
       else
-        call recv(psii, nang*chunk*ng, rrank)
+        call recv(psii, ang_set*chunk*nang_sets*ng, rrank)
       end if
 
       !$omp parallel do private(cj,j,i,a,psi)
@@ -121,20 +123,22 @@ subroutine sweeper(rank,lrank,rrank,            &
           j = (c-1)*chunk + cj
           do i = xmin, xmax, istep ! Loop over x-dimension
 !dir$ vector nontemporal(aflux1)
-            do a = 1, nang         ! Loop over angles
+            do as = 1, nang_sets   ! Loop over angle sets
+            do a = 1, ang_set      ! Loop over angles in set
               ! Calculate angular flux
-              psi = (mu(a)*psii(a,cj,g) + eta(a)*psij(a,i,g) + v*aflux0(a,i,j,sweep,g)) &
-                    / (0.07_8 + 2.0_8*mu(a)/dx + 2.0_8*eta(a)/dy + v)
+              psi = (mu(a,as)*psii(a,cj,as,g) + eta(a,as)*psij(a,i,as,g) + v*aflux0(a,i,j,as,sweep,g)) &
+                    / (0.07_8 + 2.0_8*mu(a,as)/dx + 2.0_8*eta(a,as)/dy + v)
 
               ! Outgoing diamond difference
-              psii(a,cj,g) = 2.0_8*psi - psii(a,cj,g)
-              psij(a,i,g) = 2.0_8*psi - psij(a,i,g)
-              aflux1(a,i,j,sweep,g) = 2.0_8*psi - aflux0(a,i,j,sweep,g)
+              psii(a,cj,as,g) = 2.0_8*psi - psii(a,cj,as,g)
+              psij(a,i,as,g) = 2.0_8*psi - psij(a,i,as,g)
+              aflux1(a,i,j,as,sweep,g) = 2.0_8*psi - aflux0(a,i,j,as,sweep,g)
   
               ! Reduction
-              sflux(i,j,g) = sflux(i,j,g) + psi*w(a)
+              sflux(i,j,g) = sflux(i,j,g) + psi*w(a,as)
 
-            end do ! angle loop
+            end do ! angles in set loop
+            end do ! angle sets loop
           end do ! x loop
         end do ! y chunk loop
       end do ! group loop
@@ -145,9 +149,9 @@ subroutine sweeper(rank,lrank,rrank,            &
       call wait_on_sends
       buf = psii
       if (istep .eq. 1) then
-        call send(buf, nang*chunk*ng, rrank)
+        call send(buf, ang_set*chunk*nang_sets*ng, rrank)
       else
-        call send(buf, nang*chunk*ng, lrank)
+        call send(buf, ang_set*chunk*nang_sets*ng, lrank)
       end if
 
     end do ! chunk loop

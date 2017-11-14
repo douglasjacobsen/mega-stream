@@ -82,7 +82,7 @@ contains
   ! Receive 3D array
   subroutine recv(array,num,from)
 
-    real(kind=8) :: array(:,:,:)
+    real(kind=8) :: array(:,:,:,:)
     integer, intent(in) :: num, from
     integer :: err
     real(kind=8) :: time
@@ -108,7 +108,7 @@ contains
   ! Send 3D array
   subroutine send(array,num,to)
 
-    real(kind=8) :: array(:,:,:)
+    real(kind=8) :: array(:,:,:,:)
     integer, intent(in) :: num, to
     integer :: err
 

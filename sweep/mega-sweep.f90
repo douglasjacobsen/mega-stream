@@ -33,7 +33,7 @@ program megasweep
   ! MPI variables
   integer :: rank, nprocs
   integer :: lrank, rrank ! neighbour ranks
-  real(kind=8), dimension(:,:,:), allocatable :: buf ! comms buffer
+  real(kind=8), dimension(:,:,:,:), allocatable :: buf ! comms buffer
 
   ! OpenMP variables
   integer :: nthreads
@@ -45,17 +45,19 @@ program megasweep
   integer :: chunk    ! chunk size
   integer :: nsweeps  ! sweep direction
   integer :: ntimes   ! number of times
+  integer :: nang_sets ! number of angle sets - each set should require a single cache line
+  integer, parameter :: ang_set = 8 ! number of angles in set
 
   ! Arrays
-  real(kind=8), dimension(:,:,:,:,:), pointer :: aflux0, aflux1 ! angular flux
-  real(kind=8), dimension(:,:,:,:,:), pointer :: aflux_ptr      ! for pointer swap
-  real(kind=8), dimension(:,:,:), allocatable :: sflux          ! scalar flux
-  real(kind=8), dimension(:), allocatable :: mu, eta            ! angular cosines
-  real(kind=8), dimension(:,:,:), allocatable :: psii, psij     ! edge angular flux
-  real(kind=8), dimension(:), allocatable :: w                  ! scalar flux weights
-  real(kind=8) :: v                                             ! time constant
-  real(kind=8) :: dx, dy                                        ! cell size
-  real(kind=8), dimension(:), allocatable :: pop                ! scalar flux reduction
+  real(kind=8), dimension(:,:,:,:,:,:), pointer :: aflux0, aflux1 ! angular flux
+  real(kind=8), dimension(:,:,:,:,:,:), pointer :: aflux_ptr      ! for pointer swap
+  real(kind=8), dimension(:,:,:), allocatable :: sflux            ! scalar flux
+  real(kind=8), dimension(:,:), allocatable :: mu, eta            ! angular cosines
+  real(kind=8), dimension(:,:,:,:), allocatable :: psii, psij     ! edge angular flux
+  real(kind=8), dimension(:,:), allocatable :: w                  ! scalar flux weights
+  real(kind=8) :: v                                               ! time constant
+  real(kind=8) :: dx, dy                                          ! cell size
+  real(kind=8), dimension(:), allocatable :: pop                  ! scalar flux reduction
   real(kind=8) :: total_pop
 
   ! Timers
@@ -91,6 +93,15 @@ program megasweep
 
   ! Read in command line arguments
   call parse_args(rank,nang,nx,ny,ng,chunk,ntimes,ydecomp)
+
+  ! Set number of angle sets
+  if (mod(nang, ang_set) .ne. 0) then
+    if (rank .eq. 0) then
+      print *, "Number of angles must divide 8"
+    end if
+    stop
+  end if
+  nang_sets = nang / ang_set
 
   ! Check ny is split into even number of chunks
   if (.not. ydecomp .and. mod(ny,chunk) .ne. 0) then
@@ -159,6 +170,7 @@ program megasweep
     write(*,'(a)') "Input"
     write(*,'(1x,a,i0,1x,a,1x,i0)') "Mesh size:          ", nx, "x", ny
     write(*,'(1x,a,i0)')      "Angles:             ", nang
+    write(*,'(1x,a,i0,1x,a,1x,i0)') "Angle sets:         ", nang_sets, "x", ang_set
     write(*,'(1x,a,i0)')      "Groups:             ", ng
     write(*,'(1x,a,i0)')      "Chunk:              ", chunk
     write(*,'(1x,a,i0)')      "Num. times:         ", ntimes
@@ -196,30 +208,30 @@ program megasweep
 
 
   ! Allocate data
-  allocate(aflux0(nang,lnx,lny,nsweeps,ng))
-  allocate(aflux1(nang,lnx,lny,nsweeps,ng))
+  allocate(aflux0(ang_set,lnx,lny,nang_sets,nsweeps,ng))
+  allocate(aflux1(ang_set,lnx,lny,nang_sets,nsweeps,ng))
   allocate(sflux(lnx,lny,ng))
-  allocate(mu(nang))
-  allocate(eta(nang))
+  allocate(mu(ang_set,nang_sets))
+  allocate(eta(ang_set,nang_sets))
   if (ydecomp) then
-    allocate(psii(nang,lny,ng))
-    allocate(psij(nang,chunk,ng))
+    allocate(psii(ang_set,lny,nang_sets,ng))
+    allocate(psij(ang_set,chunk,nang_sets,ng))
   else
-    allocate(psii(nang,chunk,ng))
-    allocate(psij(nang,lnx,ng))
+    allocate(psii(ang_set,chunk,nang_sets,ng))
+    allocate(psij(ang_set,lnx,nang_sets,ng))
   end if
-  allocate(w(nang))
+  allocate(w(ang_set,nang_sets))
   allocate(pop(ng))
-  allocate(buf(nang,chunk,ng))
+  allocate(buf(ang_set,chunk,nang_sets,ng))
 
   ! Initilise data
   !$omp parallel do
   do g = 1, ng
-    aflux0(:,:,:,:,g) = 1.0_8
-    aflux1(:,:,:,:,g) = 0.0_8
+    aflux0(:,:,:,:,:,g) = 1.0_8
+    aflux1(:,:,:,:,:,g) = 0.0_8
     sflux(:,:,g) = 0.0_8
-    psii(:,:,g)= 0.0_8
-    psij(:,:,g)= 0.0_8
+    psii(:,:,:,g)= 0.0_8
+    psij(:,:,:,g)= 0.0_8
   end do
   mu = 0.33_8
   eta = 0.66_8
@@ -242,14 +254,19 @@ program megasweep
     ! Don't zero scalar flux, as it goes negative - OK for this benchmark with fake numbers
 
     if (ydecomp) then
-      call sweeper_y(rank,lrank,rrank,           &
-                   nang,nx,lny,ng,nsweeps,chunk, &
-                   aflux0,aflux1,sflux,          &
-                   psii,psij,                    &
-                   mu,eta,w,v,dx,dy,buf)
+      if (rank .eq. 0) then
+        print *, "Y decomposition not supported with tiling"
+      end if
+      stop
+      !call sweeper_y(rank,lrank,rrank,           &
+      !             nang,nx,lny,ng,nsweeps,chunk, &
+      !             aflux0,aflux1,sflux,          &
+      !             psii,psij,                    &
+      !             mu,eta,w,v,dx,dy,buf)
     else
       call sweeper(rank,lrank,rrank,             &
-                   nang,lnx,ny,ng,nsweeps,chunk, &
+                   nang,ang_set,nang_sets,       &
+                   lnx,ny,ng,nsweeps,chunk,      &
                    aflux0,aflux1,sflux,          &
                    psii,psij,                    &
                    mu,eta,w,v,dx,dy,buf)
